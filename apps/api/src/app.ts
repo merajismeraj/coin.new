@@ -5,18 +5,42 @@ import type { Config } from "./config.js";
 import { bearerToken, parseApiKey } from "./lib/api-keys.js";
 import { HttpError } from "./lib/errors.js";
 import { registerIdempotency } from "./plugins/idempotency.js";
+import type { ChainVerifier } from "@coinnew/chains/verify";
 import { checkoutRoutes } from "./routes/checkout.js";
+import { indexerWebhookRoutes } from "./routes/indexer-webhooks.js";
+import type { PaymentDeps } from "./services/payments.js";
+import type { WalletScreener } from "./services/screening.js";
 import { invoiceRoutes } from "./routes/invoices.js";
 import { merchantRoutes } from "./routes/merchants.js";
 
 const WRITE_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
-export async function buildApp({ db, config, logger = true }: { db: Db; config: Config; logger?: FastifyServerOptions["logger"] }) {
+export interface AppDeps {
+  db: Db;
+  config: Config;
+  verifier: ChainVerifier;
+  screener: WalletScreener;
+  logger?: FastifyServerOptions["logger"];
+}
+
+export async function buildApp({ db, config, verifier, screener, logger = true }: AppDeps) {
   const app = Fastify({
+    trustProxy: config.trustedProxies.length ? config.trustedProxies : false,
     logger: logger && {
       // Never log API keys (spec §7.1).
       redact: ["req.headers.authorization"],
     },
+  });
+
+  // Keep the raw body: inbound webhook signatures are computed over exact bytes.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
+    (req as typeof req & { rawBody?: string }).rawBody = body as string;
+    if (body === "") return done(null, undefined);
+    try {
+      done(null, JSON.parse(body as string));
+    } catch {
+      done(Object.assign(new Error("Body is not valid JSON"), { statusCode: 400, code: "invalid_json" }), undefined);
+    }
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -53,6 +77,8 @@ export async function buildApp({ db, config, logger = true }: { db: Db; config: 
   app.get("/health", async () => ({ ok: true }));
   await app.register(merchantRoutes, { db });
   await app.register(invoiceRoutes, { db, config });
-  await app.register(checkoutRoutes, { db });
+  const payments: PaymentDeps = { db, verifier, screener, network: config.network, log: app.log };
+  await app.register(checkoutRoutes, { db, config, payments });
+  await app.register(indexerWebhookRoutes, { db, config });
   return app;
 }

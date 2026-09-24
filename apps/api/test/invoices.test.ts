@@ -32,6 +32,7 @@ describe("POST /v1/invoices", () => {
   it("validates amounts, chains and custom invoice numbers", async () => {
     for (const amount_usd of [0, -5, "1.001", 0.1 + 0.2, "abc"]) expect((await create({ amount_usd })).statusCode).toBe(400);
     expect((await create({ amount_usd: 5, accepted_chains: ["solana"] })).json().error.code).toBe("chain_not_enabled");
+    expect((await create({ amount_usd: 5, accepted_chains: ["base"], accepted_tokens: ["USDT"] })).json().error.code).toBe("no_payment_option");
     expect((await create({ amount_usd: 5, invoice_number: "A-1" })).statusCode).toBe(201);
     expect((await create({ amount_usd: 5, invoice_number: "A-1" })).statusCode).toBe(409);
   });
@@ -92,13 +93,19 @@ describe("GET /v1/checkout/:invoice_id (public)", () => {
     expect(res.json()).toEqual({
       id: inv.id,
       invoice_number: "INV-00001",
-      merchant_name: "Acme FZ-LLC",
+      merchant_name: "Acme Ltd",
       amount_usd: "99.00",
       accepted_tokens: ["USDC", "USDT"],
       accepted_chains: ["ethereum", "base", "polygon"],
       status: "pending",
       expires_at: null,
+      payment: null,
+      payment_options: expect.any(Array),
     });
+    // No USDT on Base: only official issuances are offered.
+    expect(res.json().payment_options.map((o: { chain: string; token: string }) => `${o.chain}:${o.token}`)).toEqual([
+      "ethereum:USDC", "ethereum:USDT", "base:USDC", "polygon:USDC", "polygon:USDT",
+    ]);
   });
 
   it("404s for unknown or malformed ids", async () => {

@@ -40,6 +40,15 @@ export const WalletAddress = z
   .trim()
   .refine((a) => walletFamily(a) !== null, "must be an EVM (0x…) or Solana (base58) address");
 
+export const EvmAddress = z.string().trim().refine((a) => walletFamily(a) === "evm", "must be an EVM address (0x…)");
+export const SolanaAddress = z.string().trim().refine((a) => walletFamily(a) === "solana", "must be a Solana address");
+
+/** One receiving address per chain family; at least one is required. */
+export interface ReceivingWallets {
+  evm: string | null;
+  solana: string | null;
+}
+
 /** USD amount with at most 2 decimals, carried as a string to avoid float drift. */
 export const UsdAmount = z
   .union([z.string(), z.number()])
@@ -60,18 +69,23 @@ const uniq = <T>(xs: T[]) => [...new Set(xs)];
 
 // ---- Merchants -------------------------------------------------------------
 
+const ReceivingWalletsInput = z.object({
+  evm: EvmAddress.nullable().optional(),
+  solana: SolanaAddress.nullable().optional(),
+});
+
 export const CreateMerchantBody = z.object({
   business_name: z.string().trim().min(1).max(200),
   email: z.string().trim().toLowerCase().email(),
   country_code: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, "ISO 3166-1 alpha-2"),
-  default_receiving_wallet: WalletAddress,
+  receiving_wallets: ReceivingWalletsInput.refine((w) => !!(w.evm || w.solana), "at least one receiving wallet is required"),
   preferred_chains: z.array(Chain).min(1).transform(uniq).optional(),
 });
 export type CreateMerchantBody = z.input<typeof CreateMerchantBody>;
 
 export const UpdateMerchantBody = z
   .object({
-    default_receiving_wallet: WalletAddress,
+    receiving_wallets: ReceivingWalletsInput,
     preferred_chains: z.array(Chain).min(1).transform(uniq),
     webhook_url: HttpsUrl.nullable(),
     payout_preference: PayoutPreference,
@@ -87,7 +101,7 @@ export interface Merchant {
   business_name: string;
   email: string;
   country_code: string;
-  default_receiving_wallet: string;
+  receiving_wallets: ReceivingWallets;
   preferred_chains: Chain[];
   payout_preference: PayoutPreference;
   webhook_url: string | null;
@@ -143,7 +157,10 @@ export interface Settlement {
   amount: string;
   from_address: string | null;
   to_address: string;
+  /** null while awaiting the chain's confirmation depth. */
   confirmed_at: string | null;
+  /** e.g. "sanctions_match" when the payer wallet screens positive. Funds are already with the merchant. */
+  risk_flags: string[];
 }
 
 export interface Invoice {
@@ -172,6 +189,17 @@ export interface Page<T> {
 
 // ---- Checkout (public) -----------------------------------------------------
 
+/** A (chain, token) pair this invoice can be paid with. */
+export interface PaymentOption {
+  chain: Chain;
+  chain_name: string;
+  /** EVM chain id; null for Solana. */
+  chain_id: number | null;
+  token: Token;
+  token_address: string;
+  decimals: number;
+}
+
 /** Deliberately minimal: no merchant email, no buyer PII. */
 export interface CheckoutInvoice {
   id: string;
@@ -182,6 +210,45 @@ export interface CheckoutInvoice {
   accepted_chains: Chain[];
   status: InvoiceStatus;
   expires_at: string | null;
+  payment_options: PaymentOption[];
+  /** Present once a payment has been observed. */
+  payment: { chain: Chain; tx_hash: string; explorer_url: string; confirmed: boolean } | null;
+}
+
+export const PaymentSelection = z.object({ chain: Chain, token: Token });
+
+export const OnchainIntentBody = PaymentSelection.extend({
+  payer_address: WalletAddress,
+});
+export type OnchainIntentBody = z.input<typeof OnchainIntentBody>;
+
+export interface Quote extends PaymentOption {
+  to_address: string;
+  /** Invoice amount in token units at par (stablecoin = $1). Intents add a sub-cent reference. */
+  amount: string;
+  amount_units: string;
+}
+
+/**
+ * Exactly what the buyer must send. `amount_units` includes a unique sub-cent
+ * reference that identifies this payment; sending any other amount won't match.
+ */
+export interface OnchainIntent extends Quote {
+  id: string;
+  payer_address: string;
+  expires_at: string;
+}
+
+// ---- Outbound webhooks -----------------------------------------------------
+
+export const WEBHOOK_EVENTS = ["invoice.paid", "invoice.canceled", "invoice.expired", "settlement.confirmed"] as const;
+export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
+
+export interface WebhookEvent<T = unknown> {
+  id: string;
+  type: WebhookEventType;
+  created_at: string;
+  data: T;
 }
 
 // ---- Errors ----------------------------------------------------------------

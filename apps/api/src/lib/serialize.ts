@@ -19,7 +19,7 @@ export const toMerchant = (m: Row<typeof merchants>): Merchant => ({
   business_name: m.businessName,
   email: m.email,
   country_code: m.countryCode,
-  default_receiving_wallet: m.defaultReceivingWallet,
+  receiving_wallets: { evm: m.evmWallet, solana: m.solanaWallet },
   preferred_chains: m.preferredChains as Chain[],
   payout_preference: m.payoutPreference as PayoutPreference,
   webhook_url: m.webhookUrl,
@@ -54,13 +54,19 @@ export const toSettlement = (s: Row<typeof settlements>): Settlement => ({
   chain: s.chain as Chain | null,
   tx_hash: s.txHash,
   token: s.token as Token,
-  amount: s.amount,
+  // numeric(38,18) pads with zeros; return the canonical decimal.
+  amount: s.amount.includes(".") ? s.amount.replace(/\.?0+$/, "") : s.amount,
   from_address: s.fromAddress,
   to_address: s.toAddress,
   confirmed_at: iso(s.confirmedAt),
+  risk_flags: s.riskFlags,
 });
 
-export const toCheckoutInvoice = (i: Row<typeof invoices>, merchantName: string): CheckoutInvoice => ({
+export const toCheckoutInvoice = (
+  i: Row<typeof invoices>,
+  merchantName: string,
+  extra: Pick<CheckoutInvoice, "payment_options" | "payment">,
+): CheckoutInvoice => ({
   id: i.id,
   invoice_number: i.invoiceNumber,
   merchant_name: merchantName,
@@ -69,4 +75,5 @@ export const toCheckoutInvoice = (i: Row<typeof invoices>, merchantName: string)
   accepted_chains: i.acceptedChains as Chain[],
   status: effectiveStatus(i),
   expires_at: iso(i.expiresAt),
+  ...extra,
 });

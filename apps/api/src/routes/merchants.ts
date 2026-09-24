@@ -1,15 +1,17 @@
 import { apiKeys, merchants, type Db } from "@coinnew/db";
 import {
   chainFamily,
+  CHAINS,
   CreateApiKeyBody,
   CreateMerchantBody,
-  EVM_CHAINS,
   UpdateMerchantBody,
-  walletFamily,
   type Chain,
+  type ChainFamily,
   type CreateMerchantResponse,
   type IssuedApiKey,
+  type ReceivingWallets,
 } from "@coinnew/shared-types";
+import { checksumEvm } from "../lib/address.js";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -17,23 +19,25 @@ import { generateApiKey } from "../lib/api-keys.js";
 import { HttpError, isUniqueViolation, parse } from "../lib/errors.js";
 import { toApiKey, toMerchant } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
+import { newSigningSecret } from "../services/webhooks.js";
 
 const REDACTED = "[redacted: shown once at creation]";
 
-/**
- * A single receiving address can only serve one chain family. Until merchants
- * register per-family addresses (needed before Phase 2 ships Solana), every
- * preferred chain must match the wallet's family.
- */
-function resolveChains(wallet: string, requested: Chain[] | undefined): Chain[] {
-  const family = walletFamily(wallet)!;
-  if (!requested) return family === "evm" ? [...EVM_CHAINS] : ["solana"];
-  const mismatched = requested.filter((c) => chainFamily(c) !== family);
-  if (mismatched.length) {
-    throw new HttpError(422, "chain_wallet_mismatch", `Receiving wallet is a ${family} address and cannot receive on: ${mismatched.join(", ")}`);
+const families = (w: ReceivingWallets) => new Set<ChainFamily>([...(w.evm ? ["evm" as const] : []), ...(w.solana ? ["solana" as const] : [])]);
+
+/** Every enabled chain needs a receiving wallet of its family. Defaults to all chains the wallets can receive on. */
+function resolveChains(wallets: ReceivingWallets, requested: Chain[] | undefined): Chain[] {
+  const have = families(wallets);
+  if (!requested) return CHAINS.filter((c) => have.has(chainFamily(c)));
+  const missing = requested.filter((c) => !have.has(chainFamily(c)));
+  if (missing.length) {
+    throw new HttpError(422, "chain_wallet_mismatch", `No receiving wallet for: ${missing.join(", ")}. Add a ${chainFamily(missing[0]!)} wallet first.`);
   }
   return requested;
 }
+
+/** Checksums EVM addresses so they display and compare consistently. */
+const normalizeEvm = (a: string | null | undefined) => (a ? checksumEvm(a, "receiving_wallets.evm") : a);
 
 async function issueKey(db: Db, merchantId: string, label: string | null): Promise<IssuedApiKey> {
   const key = await generateApiKey();
@@ -48,7 +52,8 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
     { config: { redactReplay: (b: CreateMerchantResponse) => ({ ...b, api_key: { ...b.api_key, key: REDACTED } }) } },
     async (req, reply) => {
       const body = parse(CreateMerchantBody, req.body);
-      const preferredChains = resolveChains(body.default_receiving_wallet, body.preferred_chains);
+      const wallets = { evm: normalizeEvm(body.receiving_wallets.evm) ?? null, solana: body.receiving_wallets.solana ?? null };
+      const preferredChains = resolveChains(wallets, body.preferred_chains);
       const result = await db
         .transaction(async (tx) => {
           const [m] = await tx
@@ -57,8 +62,10 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
               businessName: body.business_name,
               email: body.email,
               countryCode: body.country_code,
-              defaultReceivingWallet: body.default_receiving_wallet,
+              evmWallet: wallets.evm,
+              solanaWallet: wallets.solana,
               preferredChains,
+              webhookSigningSecret: newSigningSecret(),
             })
             .returning();
           return { merchant: toMerchant(m!), api_key: await issueKey(tx as unknown as Db, m!.id, "default") };
@@ -85,13 +92,21 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
     authed.patch("/v1/merchants/me", async (req) => {
       const body = parse(UpdateMerchantBody, req.body);
       const current = await loadMe(req.merchantId!);
-      const wallet = body.default_receiving_wallet ?? current.defaultReceivingWallet;
-      const walletChanged = body.default_receiving_wallet !== undefined && body.default_receiving_wallet !== current.defaultReceivingWallet;
-      // Changing wallet family without new chains re-derives the defaults.
+      const before: ReceivingWallets = { evm: current.evmWallet, solana: current.solanaWallet };
+      const input = body.receiving_wallets ?? {};
+      const wallets: ReceivingWallets = {
+        evm: input.evm === undefined ? before.evm : (normalizeEvm(input.evm) ?? null),
+        solana: input.solana === undefined ? before.solana : input.solana,
+      };
+      if (!wallets.evm && !wallets.solana) throw new HttpError(422, "wallet_required", "At least one receiving wallet is required");
+
+      // Without explicit chains: keep what still has a wallet, and enable chains of a newly added family.
+      const had = families(before);
+      const has = families(wallets);
       const chains =
         body.preferred_chains ??
-        (walletChanged && walletFamily(wallet) !== walletFamily(current.defaultReceivingWallet) ? undefined : (current.preferredChains as Chain[]));
-      const preferredChains = resolveChains(wallet, chains);
+        CHAINS.filter((c) => has.has(chainFamily(c)) && ((current.preferredChains as Chain[]).includes(c) || !had.has(chainFamily(c))));
+      const preferredChains = resolveChains(wallets, chains.length ? chains : undefined);
 
       if (body.payout_preference === "fiat_via_partner" && !current.partnerRailCustomerId) {
         throw new HttpError(422, "partner_rail_required", "Fiat payout requires onboarding with a licensed partner rail first");
@@ -99,7 +114,8 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
       const [m] = await db
         .update(merchants)
         .set({
-          defaultReceivingWallet: wallet,
+          evmWallet: wallets.evm,
+          solanaWallet: wallets.solana,
           preferredChains,
           ...(body.webhook_url !== undefined && { webhookUrl: body.webhook_url }),
           ...(body.payout_preference && { payoutPreference: body.payout_preference }),
@@ -108,6 +124,25 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
         .returning();
       return toMerchant(m!);
     });
+
+    // Secret used to sign outbound webhooks (X-coinnew-Signature). Readable by the merchant, like any webhook secret.
+    authed.get("/v1/merchants/me/webhook-secret", async (req) => {
+      const m = await loadMe(req.merchantId!);
+      if (m.webhookSigningSecret) return { secret: m.webhookSigningSecret };
+      const secret = newSigningSecret();
+      await db.update(merchants).set({ webhookSigningSecret: secret }).where(and(eq(merchants.id, m.id), isNull(merchants.webhookSigningSecret)));
+      return { secret: (await loadMe(m.id)).webhookSigningSecret };
+    });
+
+    authed.post(
+      "/v1/merchants/me/webhook-secret/rotate",
+      { config: { redactReplay: () => ({ secret: REDACTED }) } },
+      async (req) => {
+        const secret = newSigningSecret();
+        await db.update(merchants).set({ webhookSigningSecret: secret }).where(eq(merchants.id, req.merchantId!));
+        return { secret };
+      },
+    );
 
     authed.get("/v1/merchants/me/api-keys", async (req) => {
       const rows = await db.select().from(apiKeys).where(eq(apiKeys.merchantId, req.merchantId!)).orderBy(desc(apiKeys.createdAt));

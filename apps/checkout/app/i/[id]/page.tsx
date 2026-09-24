@@ -1,19 +1,17 @@
-import type { Chain, CheckoutInvoice } from "@coinnew/shared-types";
+import type { CheckoutInvoice } from "@coinnew/shared-types";
 import { notFound } from "next/navigation";
 import { Countdown } from "@/components/countdown";
+import { PayPanel } from "@/components/pay-panel";
+import { Providers } from "@/components/providers";
 import { getCheckoutInvoice } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-const CHAIN_LABEL: Record<Chain, string> = { ethereum: "Ethereum", base: "Base", polygon: "Polygon", solana: "Solana" };
 const usd = (a: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(a));
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-full border border-zinc-200 px-2.5 py-0.5 text-xs font-medium dark:border-zinc-700">{children}</span>;
-}
 
 function Closed({ inv }: { inv: CheckoutInvoice }) {
   const copy: Partial<Record<CheckoutInvoice["status"], [string, string]>> = {
+    pending: ["Payment unavailable", `This invoice has no payment method available. Contact ${inv.merchant_name}.`],
     paid: ["Paid", "This invoice has been paid. Thank you!"],
     processing: ["Payment detected", "We’re waiting for final confirmation on-chain."],
     expired: ["Invoice expired", `Ask ${inv.merchant_name} to send a new payment link.`],
@@ -25,6 +23,11 @@ function Closed({ inv }: { inv: CheckoutInvoice }) {
     <div className="rounded-lg bg-zinc-50 p-4 text-center dark:bg-zinc-800/50">
       <p className={`font-semibold ${tone}`}>{title}</p>
       <p className="mt-1 text-sm text-zinc-500">{body}</p>
+      {inv.payment && (
+        <a href={inv.payment.explorer_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-brand hover:underline">
+          View transaction ↗
+        </a>
+      )}
     </div>
   );
 }
@@ -45,21 +48,10 @@ export default async function CheckoutPage({ params }: { params: { id: string } 
 
         <hr className="my-5 border-zinc-100 dark:border-zinc-800" />
 
-        {inv.status === "pending" ? (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Pay with</p>
-              <div className="flex flex-wrap gap-1.5">{inv.accepted_tokens.map((t) => <Chip key={t}>{t}</Chip>)}</div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">On</p>
-              <div className="flex flex-wrap gap-1.5">{inv.accepted_chains.map((c) => <Chip key={c}>{CHAIN_LABEL[c]}</Chip>)}</div>
-            </div>
-            <button disabled className="w-full cursor-not-allowed rounded-lg bg-brand px-4 py-3 text-sm font-semibold text-brand-fg opacity-50">
-              Connect wallet to pay
-            </button>
-            <p className="text-center text-xs text-zinc-500">Wallet payments are being enabled for this merchant. Check back shortly.</p>
-          </div>
+        {inv.status === "pending" && inv.payment_options.length > 0 ? (
+          <Providers>
+            <PayPanel invoice={inv} />
+          </Providers>
         ) : (
           <Closed inv={inv} />
         )}

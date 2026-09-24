@@ -9,35 +9,41 @@ afterEach(() => ctx.close());
 describe("onboarding", () => {
   it("creates a merchant, normalises input and returns an API key once", async () => {
     const { merchant, api_key } = await onboard(ctx.app, { email: "Owner@Acme.TEST" });
-    expect(merchant).toMatchObject({ email: "owner@acme.test", country_code: "AE", payout_preference: "crypto", preferred_chains: ["ethereum", "base", "polygon"] });
+    expect(merchant).toMatchObject({ email: "owner@acme.test", country_code: "GB", payout_preference: "crypto", preferred_chains: ["ethereum", "base", "polygon"] });
     expect(api_key.key).toMatch(/^cn_[0-9a-f]{32}_[\w-]{43}$/);
     expect(merchant).not.toHaveProperty("api_key_hash");
   });
 
-  it("derives Solana-only chains from a Solana wallet", async () => {
-    const { merchant } = await onboard(ctx.app, { default_receiving_wallet: SOL_WALLET });
-    expect(merchant.preferred_chains).toEqual(["solana"]);
+  it("derives chains from the wallets provided", async () => {
+    expect((await onboard(ctx.app, { receiving_wallets: { solana: SOL_WALLET } })).merchant.preferred_chains).toEqual(["solana"]);
+    const both = await onboard(ctx.app, { receiving_wallets: { evm: EVM_WALLET.toLowerCase(), solana: SOL_WALLET } });
+    expect(both.merchant.preferred_chains).toEqual(["ethereum", "base", "polygon", "solana"]);
+    expect(both.merchant.receiving_wallets).toEqual({ evm: EVM_WALLET, solana: SOL_WALLET });
   });
 
-  it("rejects chains the receiving wallet cannot receive on", async () => {
+  it("rejects chains without a wallet of their family", async () => {
     const res = await call(ctx.app, "POST", "/v1/merchants", {
-      body: { business_name: "X", email: "x@x.test", country_code: "US", default_receiving_wallet: EVM_WALLET, preferred_chains: ["base", "solana"] },
+      body: { business_name: "X", email: "x@x.test", country_code: "US", receiving_wallets: { evm: EVM_WALLET }, preferred_chains: ["base", "solana"] },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe("chain_wallet_mismatch");
   });
 
-  it("rejects invalid wallets and duplicate emails", async () => {
-    const bad = await call(ctx.app, "POST", "/v1/merchants", { body: { business_name: "X", email: "x@x.test", country_code: "US", default_receiving_wallet: "not-a-wallet" } });
-    expect(bad.statusCode).toBe(400);
+  it("rejects wrong-family addresses, missing wallets and duplicate emails", async () => {
+    const base = { business_name: "X", email: "x@x.test", country_code: "US" };
+    expect((await call(ctx.app, "POST", "/v1/merchants", { body: { ...base, receiving_wallets: { evm: SOL_WALLET } } })).statusCode).toBe(400);
+    expect((await call(ctx.app, "POST", "/v1/merchants", { body: { ...base, receiving_wallets: {} } })).statusCode).toBe(400);
+    // One flipped case in a checksummed address = typo.
+    const typo = await call(ctx.app, "POST", "/v1/merchants", { body: { ...base, receiving_wallets: { evm: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".replace("fCD", "fcD") } } });
+    expect(typo.json().error.details[0].message).toMatch(/checksum/);
     await onboard(ctx.app, { email: "dup@x.test" });
-    const dup = await call(ctx.app, "POST", "/v1/merchants", { body: { business_name: "X", email: "dup@x.test", country_code: "US", default_receiving_wallet: EVM_WALLET } });
+    const dup = await call(ctx.app, "POST", "/v1/merchants", { body: { ...base, email: "dup@x.test", receiving_wallets: { evm: EVM_WALLET } } });
     expect(dup.statusCode).toBe(409);
   });
 });
 
 describe("idempotency", () => {
-  const body = { business_name: "Idem", email: "idem@x.test", country_code: "US", default_receiving_wallet: EVM_WALLET };
+  const body = { business_name: "Idem", email: "idem@x.test", country_code: "US", receiving_wallets: { evm: EVM_WALLET } };
 
   it("requires the header on mutating requests", async () => {
     const res = await call(ctx.app, "POST", "/v1/merchants", { body, idem: null });
@@ -112,11 +118,25 @@ describe("auth and API keys", () => {
 });
 
 describe("PATCH /v1/merchants/me", () => {
-  it("updates webhook and wallet, re-deriving chains on a family switch", async () => {
+  it("adding a wallet family enables its chains; removing one disables them", async () => {
     const { api_key } = await onboard(ctx.app);
-    const res = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: api_key.key, body: { webhook_url: "https://acme.test/hooks", default_receiving_wallet: SOL_WALLET } });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ webhook_url: "https://acme.test/hooks", default_receiving_wallet: SOL_WALLET, preferred_chains: ["solana"] });
+    const k = api_key.key;
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key: k, body: { preferred_chains: ["base"] } });
+    const added = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: k, body: { webhook_url: "https://acme.test/hooks", receiving_wallets: { solana: SOL_WALLET } } });
+    expect(added.json()).toMatchObject({ webhook_url: "https://acme.test/hooks", preferred_chains: ["base", "solana"], receiving_wallets: { evm: EVM_WALLET, solana: SOL_WALLET } });
+    const removed = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: k, body: { receiving_wallets: { evm: null } } });
+    expect(removed.json()).toMatchObject({ preferred_chains: ["solana"], receiving_wallets: { evm: null, solana: SOL_WALLET } });
+    const none = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: k, body: { receiving_wallets: { solana: null } } });
+    expect(none.json().error.code).toBe("wallet_required");
+  });
+
+  it("exposes and rotates the webhook signing secret", async () => {
+    const { api_key } = await onboard(ctx.app);
+    const first = (await call(ctx.app, "GET", "/v1/merchants/me/webhook-secret", { key: api_key.key })).json().secret;
+    expect(first).toMatch(/^whsec_/);
+    const rotated = (await call(ctx.app, "POST", "/v1/merchants/me/webhook-secret/rotate", { key: api_key.key })).json().secret;
+    expect(rotated).not.toBe(first);
+    expect((await call(ctx.app, "GET", "/v1/merchants/me/webhook-secret", { key: api_key.key })).json().secret).toBe(rotated);
   });
 
   it("rejects plain-http webhooks and gates fiat payout behind a partner rail", async () => {
