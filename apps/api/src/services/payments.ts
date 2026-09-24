@@ -155,7 +155,8 @@ async function settleTransfer(deps: PaymentDeps, t: ObservedTransfer, final: boo
   return "created";
 }
 
-async function onConfirmed(db: Db, s: typeof settlements.$inferSelect) {
+/** Marks the invoice paid (unless canceled) and notifies the merchant. */
+export async function onConfirmed(db: Db, s: typeof settlements.$inferSelect) {
   const [paid] = await db
     .update(invoices)
     .set({ status: "paid" })

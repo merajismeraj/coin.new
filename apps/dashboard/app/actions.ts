@@ -138,3 +138,45 @@ export async function rotateWebhookSecret() {
   await authedApi("/v1/merchants/me/webhook-secret/rotate", { method: "POST" });
   revalidatePath("/settings");
 }
+
+// ---- Partner payouts (Bridge) ------------------------------------------------
+
+export async function startPartnerOnboarding() {
+  await authedApi("/v1/merchants/me/partner/onboarding", { method: "POST", body: {} });
+  revalidatePath("/settings");
+}
+
+export async function addBankAccount(_: FormState, form: FormData): Promise<FormState & { saved?: boolean }> {
+  const type = str(form, "account_type");
+  const body =
+    type === "iban"
+      ? { account_type: "iban", account_owner_name: str(form, "account_owner_name"), iban: str(form, "iban")?.replace(/\s+/g, ""), bic: str(form, "bic"), country: str(form, "country") }
+      : {
+          account_type: "us",
+          bank_name: str(form, "bank_name"),
+          account_owner_name: str(form, "account_owner_name"),
+          account_number: str(form, "account_number"),
+          routing_number: str(form, "routing_number"),
+          checking_or_savings: str(form, "checking_or_savings") ?? "checking",
+          rail: str(form, "rail") ?? "ach",
+          address: { street_line_1: str(form, "street"), city: str(form, "city"), state: str(form, "state"), postal_code: str(form, "postal_code"), country: str(form, "country") },
+        };
+  try {
+    await authedApi("/v1/merchants/me/partner/bank-account", { method: "POST", idem: str(form, "idem"), body });
+  } catch (e) {
+    return toFormState(e);
+  }
+  revalidatePath("/settings");
+  return { saved: true };
+}
+
+export async function setPayoutPreference(pref: "crypto" | "fiat_via_partner") {
+  try {
+    await authedApi("/v1/merchants/me", { method: "PATCH", body: { payout_preference: pref } });
+  } catch (e) {
+    if (!(e instanceof ApiRequestError)) throw e;
+    redirect(`/settings?error=${encodeURIComponent(e.message)}`);
+  }
+  revalidatePath("/settings");
+  redirect("/settings");
+}

@@ -151,6 +151,8 @@ export type ListInvoicesQuery = z.input<typeof ListInvoicesQuery>;
 export interface Settlement {
   id: string;
   rail: "onchain" | "circle" | "bridge" | "moonpay";
+  /** Fiat payments: the buyer's payment method at the partner. */
+  method: FiatMethod | null;
   chain: Chain | null;
   tx_hash: string | null;
   token: Token;
@@ -211,6 +213,8 @@ export interface CheckoutInvoice {
   status: InvoiceStatus;
   expires_at: string | null;
   payment_options: PaymentOption[];
+  /** Fiat ways to pay, via licensed partners. */
+  fiat_methods: FiatMethod[];
   /** Present once a payment has been observed. */
   payment: { chain: Chain; tx_hash: string; explorer_url: string; confirmed: boolean } | null;
 }
@@ -237,6 +241,82 @@ export interface OnchainIntent extends Quote {
   id: string;
   payer_address: string;
   expires_at: string;
+}
+
+// ---- Partner rails (Phase 3) -----------------------------------------------
+
+export const FIAT_METHODS = ["bank_transfer", "card"] as const;
+export type FiatMethod = (typeof FIAT_METHODS)[number];
+
+export const FiatSessionBody = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("bank_transfer"), rail: z.enum(["ach", "wire"]).default("ach") }),
+  z.object({ method: z.literal("card"), chain: Chain, token: Token }),
+]);
+export type FiatSessionBody = z.input<typeof FiatSessionBody>;
+
+/** Where the buyer sends a bank payment. The reference must be included verbatim. */
+export interface BankInstructions {
+  rail: string;
+  amount: string;
+  currency: string;
+  reference: string;
+  bank_name: string | null;
+  bank_address: string | null;
+  beneficiary_name: string | null;
+  beneficiary_address: string | null;
+  routing_number: string | null;
+  account_number: string | null;
+  iban: string | null;
+  bic: string | null;
+}
+
+export interface FiatSession {
+  id: string;
+  method: FiatMethod;
+  rail: "bridge" | "moonpay";
+  status: "open" | "processing" | "completed" | "failed";
+  instructions: BankInstructions | null;
+  redirect_url: string | null;
+}
+
+export const BankAccountBody = z.discriminatedUnion("account_type", [
+  z.object({
+    account_type: z.literal("us"),
+    bank_name: z.string().trim().min(1).max(200),
+    account_owner_name: z.string().trim().min(1).max(200),
+    account_number: z.string().trim().regex(/^\d{4,17}$/, "4-17 digits"),
+    routing_number: z.string().trim().regex(/^\d{9}$/, "9-digit ABA routing number"),
+    checking_or_savings: z.enum(["checking", "savings"]).default("checking"),
+    rail: z.enum(["ach", "wire"]).default("ach"),
+    address: z.object({
+      street_line_1: z.string().trim().min(1),
+      city: z.string().trim().min(1),
+      state: z.string().trim().optional(),
+      postal_code: z.string().trim().min(1),
+      country: z.string().trim().length(3, "ISO 3166-1 alpha-3, e.g. USA"),
+    }),
+  }),
+  z.object({
+    account_type: z.literal("iban"),
+    account_owner_name: z.string().trim().min(1).max(200),
+    iban: z.string().trim().toUpperCase().regex(/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/, "invalid IBAN"),
+    bic: z.string().trim().toUpperCase().regex(/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, "invalid BIC"),
+    country: z.string().trim().length(3, "ISO 3166-1 alpha-3, e.g. DEU"),
+  }),
+]);
+export type BankAccountBody = z.input<typeof BankAccountBody>;
+
+/** Merchant's standing with the licensed partner. KYB is run by the partner, not coin.new. */
+export interface PartnerStatus {
+  rail: "bridge";
+  kyc_status: string;
+  tos_status: string;
+  kyc_link_url: string | null;
+  tos_link_url: string | null;
+  bank_account: { last4: string; rail: string; currency: string } | null;
+  /** Approved and has a bank account: fiat payout can be enabled. */
+  payout_ready: boolean;
+  liquidation_addresses: { chain: Chain; token: Token; address: string }[];
 }
 
 // ---- Outbound webhooks -----------------------------------------------------

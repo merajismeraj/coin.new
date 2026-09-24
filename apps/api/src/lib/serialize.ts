@@ -51,6 +51,7 @@ export const toInvoice = (i: Row<typeof invoices>): Invoice => ({
 export const toSettlement = (s: Row<typeof settlements>): Settlement => ({
   id: s.id,
   rail: s.rail as Settlement["rail"],
+  method: s.rail === "bridge" ? "bank_transfer" : s.rail === "moonpay" ? "card" : null,
   chain: s.chain as Chain | null,
   tx_hash: s.txHash,
   token: s.token as Token,
@@ -65,7 +66,7 @@ export const toSettlement = (s: Row<typeof settlements>): Settlement => ({
 export const toCheckoutInvoice = (
   i: Row<typeof invoices>,
   merchantName: string,
-  extra: Pick<CheckoutInvoice, "payment_options" | "payment">,
+  extra: Pick<CheckoutInvoice, "payment_options" | "payment" | "fiat_methods">,
 ): CheckoutInvoice => ({
   id: i.id,
   invoice_number: i.invoiceNumber,

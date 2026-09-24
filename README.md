@@ -14,7 +14,7 @@ Non-custodial stablecoin payment orchestration for cross-border B2B invoicing.
 | 0 | Turborepo monorepo, CI, custody guard | ✅ |
 | 1 | Merchant onboarding + API keys, invoice CRUD, dashboard, read-only checkout | ✅ |
 | 2 | Wallet connect, direct USDC/USDT transfer, Alchemy/Helius matching, merchant webhooks | ✅ |
-| 3 | Partner rail (Bridge/Circle) fiat on-ramp, MoonPay fallback, fiat payout | — |
+| 3 | Partner rail (Bridge/Circle) fiat on-ramp, MoonPay fallback, fiat payout | ✅ |
 | 4 | Settlements API, CSV export, expiry jobs, resend + email | — |
 | 5 | Optional audited forwarder contract | — |
 
@@ -78,6 +78,11 @@ stored). Limits: 100 writes/min and 1000 reads/min per key.
 | POST | `/v1/checkout/:invoice_id/quote` | Public; amount at par for a chain/token |
 | POST | `/v1/checkout/:invoice_id/onchain-intent` | Public; screens payer, returns the exact amount to send |
 | POST | `/internal/webhooks/chain-indexer/{alchemy,helius}` | Indexer notifications (signature-verified) |
+| GET | `/v1/merchants/me/partner` | KYB status, payout bank account, liquidation addresses |
+| POST | `/v1/merchants/me/partner/onboarding` | Start/resume KYB at Bridge |
+| POST | `/v1/merchants/me/partner/bank-account` | Register payout bank account (US or IBAN) |
+| POST | `/v1/checkout/:invoice_id/fiat-session` | Public; bank transfer instructions or signed card widget URL |
+| POST | `/internal/webhooks/{bridge,moonpay}` | Partner notifications (signature-verified) |
 
 ## How on-chain payments work (Phase 2)
 
@@ -112,6 +117,30 @@ worker: read the tx from the chain via RPC ─▶ match (chain, token, to, exact
   and the actual sender is screened at settlement (flagged, since the funds are already with the
   merchant). Chainalysis' free API plus a local denylist; pluggable.
 
+## Fiat rails via licensed partners (Phase 3)
+
+| Flow | Partner | How it works | Who holds funds |
+|---|---|---|---|
+| Merchant KYB | Bridge | Hosted KYB + ToS links; status passed through (webhook + throttled pull) | — |
+| Buyer pays by bank transfer | Bridge | One Bridge transfer per invoice, on behalf of the merchant; buyer gets bank details + unique reference; Bridge settles USDC to the merchant wallet or fiat to the merchant bank | Bridge |
+| Buyer pays by card | MoonPay | Signed widget URL delivering the exact amount to the merchant's receiving address; completion is verified **on-chain** before settling | MoonPay → merchant |
+| Merchant paid in fiat | Bridge | Liquidation addresses per (chain, token) become the checkout address; Bridge converts and pays the merchant's bank | Bridge |
+
+Partner webhooks follow the same rule as chain indexers: signature-verified (Bridge RSA-SHA256,
+MoonPay HMAC, both with timestamp replay windows), stored verbatim in `partner_events`, and acted
+on only after re-reading state from the partner's API (Bridge) or the chain (MoonPay).
+Bank account numbers pass through to Bridge; coin.new stores only the partner's account id and last 4.
+
+**Verify against partner sandboxes before go-live** (built against published docs; sandboxes weren't
+reachable from the build environment):
+- Bridge: request/response field names for `kyc_links`, `external_accounts`, `liquidation_addresses`,
+  `transfers` (`source_deposit_instructions`, `receipt`), webhook signature header format.
+- Bridge: that third-party deposits (the buyer, not the merchant, funding a transfer made on behalf of
+  the merchant) are permitted for your program, and any sender-name requirements per rail.
+- MoonPay: currency codes (`usdc_base`, `usdc_polygon`, …) and that delivery to a third-party
+  (merchant) wallet is allowed under your MoonPay agreement; standard on-ramp terms require the
+  buyer to own the destination wallet. If not, use MoonPay's merchant/commerce product or drop card.
+
 ## Compliance posture
 
 coin.new is built to be jurisdiction-neutral: no market-specific logic in the codebase. The
@@ -132,7 +161,8 @@ but that's an architecture choice, not a legal guarantee. Get counsel sign-off p
   Keys are `cn_<key id>_<secret>` so auth is a single row lookup plus one argon2id verify.
 - **Invoice expiry is applied on read** (`pending` past `expires_at` reports `expired`) until the
   Phase 4 job persists it. Filters use the same rule.
-- **`fiat_via_partner` payout is rejected** until a partner rail customer exists (Phase 3).
+- **Invoices are USD-denominated**; bank transfers are USD (ACH/wire) for now. EUR/SEPA pay-in with FX
+  quoting is a follow-up; merchants can already receive EUR payouts to an IBAN.
 - **Dashboard auth is a stand-in:** the session is the API key in an httpOnly cookie. Replace with
   Clerk or Supabase Auth (spec §5.7) before GA.
 - **`/v1/invoices/:id/resend`** is deferred to Phase 4 alongside email delivery.

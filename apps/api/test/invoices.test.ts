@@ -101,6 +101,7 @@ describe("GET /v1/checkout/:invoice_id (public)", () => {
       expires_at: null,
       payment: null,
       payment_options: expect.any(Array),
+      fiat_methods: [],
     });
     // No USDT on Base: only official issuances are offered.
     expect(res.json().payment_options.map((o: { chain: string; token: string }) => `${o.chain}:${o.token}`)).toEqual([

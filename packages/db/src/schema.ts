@@ -68,6 +68,7 @@ export const settlements = pgTable("settlements", {
   intentId: uuid("intent_id").references(() => paymentIntents.id),
   logIndex: integer("log_index"),
   riskFlags: text("risk_flags").array().notNull().default([]),
+  partnerSessionId: uuid("partner_session_id"),
   rail: text("rail").notNull(),
   chain: text("chain"),
   txHash: text("tx_hash"),
@@ -113,6 +114,62 @@ export const inboundEvents = pgTable("inbound_events", {
   source: text("source").notNull(),
   chain: text("chain").notNull(),
   txHash: text("tx_hash").notNull(),
+  payload: jsonb("payload").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const partnerAccounts = pgTable("partner_accounts", {
+  merchantId: uuid("merchant_id").primaryKey().references(() => merchants.id),
+  rail: text("rail").notNull().default("bridge"),
+  customerId: text("customer_id"),
+  kycLinkId: text("kyc_link_id"),
+  kycLinkUrl: text("kyc_link_url"),
+  tosLinkUrl: text("tos_link_url"),
+  kycStatus: text("kyc_status").notNull().default("not_started"),
+  tosStatus: text("tos_status").notNull().default("pending"),
+  externalAccountId: text("external_account_id"),
+  externalAccountLast4: text("external_account_last4"),
+  externalAccountRail: text("external_account_rail"),
+  externalAccountCurrency: text("external_account_currency"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const liquidationAddresses = pgTable("liquidation_addresses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id").notNull().references(() => merchants.id),
+  rail: text("rail").notNull().default("bridge"),
+  chain: text("chain").notNull(),
+  token: text("token").notNull(),
+  address: text("address").notNull(),
+  externalId: text("external_id").notNull(),
+  externalAccountId: text("external_account_id").notNull(),
+  createdAt: createdAt(),
+});
+
+export const partnerSessions = pgTable("partner_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  rail: text("rail").notNull(),
+  method: text("method").notNull(),
+  externalId: text("external_id"),
+  status: text("status").notNull().default("open"),
+  chain: text("chain"),
+  token: text("token"),
+  toAddress: text("to_address"),
+  amountUnits: numeric("amount_units", { precision: 78, scale: 0 }),
+  instructions: jsonb("instructions"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const partnerEvents = pgTable("partner_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  source: text("source").notNull(),
+  eventId: text("event_id").notNull(),
   payload: jsonb("payload").notNull(),
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),

@@ -19,6 +19,8 @@ import type { Config } from "../config.js";
 import { HttpError, parse } from "../lib/errors.js";
 import { effectiveStatus, toCheckoutInvoice } from "../lib/serialize.js";
 import { createIntent, type PaymentDeps } from "../services/payments.js";
+import { createBankTransferSession, createCardSession, fiatMethods, receivingAddresses, type PartnerDeps } from "../services/partners.js";
+import { FiatSessionBody } from "@coinnew/shared-types";
 
 const MAX_OPEN_INTENTS_PER_INVOICE = 20;
 /** Reuse an existing intent only if the buyer still has this long to pay it. */
@@ -27,18 +29,17 @@ const REUSE_MIN_REMAINING_MS = 5 * 60_000;
 type InvoiceRow = typeof invoices.$inferSelect;
 type MerchantRow = typeof merchants.$inferSelect;
 
-function options(network: Network, inv: InvoiceRow, m: MerchantRow): PaymentOption[] {
-  const wallet = (c: Chain) => (chainFamily(c) === "evm" ? m.evmWallet : m.solanaWallet);
-  return supportedPairs(network, inv.acceptedChains as Chain[], inv.acceptedTokens as Token[])
-    .filter((t) => wallet(t.chain))
-    .map((t) => {
-      const c = chainInfo(network, t.chain);
-      return { chain: t.chain, chain_name: c.name, chain_id: c.chainId, token: t.token, token_address: t.address, decimals: t.decimals };
-    });
+function options(network: Network, inv: InvoiceRow, receiveAt: (c: Chain, t: Token) => string | null): (PaymentOption & { to_address: string })[] {
+  return supportedPairs(network, inv.acceptedChains as Chain[], inv.acceptedTokens as Token[]).flatMap((t) => {
+    const to = receiveAt(t.chain, t.token);
+    if (!to) return [];
+    const c = chainInfo(network, t.chain);
+    return [{ chain: t.chain, chain_name: c.name, chain_id: c.chainId, token: t.token, token_address: t.address, decimals: t.decimals, to_address: to }];
+  });
 }
 
 /** Public, unauthenticated: only what the hosted checkout page needs. */
-export async function checkoutRoutes(app: FastifyInstance, { db, config, payments }: { db: Db; config: Config; payments: PaymentDeps }) {
+export async function checkoutRoutes(app: FastifyInstance, { db, config, payments, partners }: { db: Db; config: Config; payments: PaymentDeps; partners: PartnerDeps }) {
   const load = async (params: unknown) => {
     const parsed = z.object({ invoice_id: z.string().uuid() }).safeParse(params);
     const notFound = new HttpError(404, "not_found", "Invoice not found");
@@ -52,15 +53,18 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
     return row;
   };
 
-  const quoteFor = (inv: InvoiceRow, m: MerchantRow, body: unknown): Quote => {
+  const assertPayable = (inv: InvoiceRow) => {
     const status = effectiveStatus(inv);
     if (status !== "pending") throw new HttpError(409, "not_payable", `Invoice is ${status}`);
+  };
+
+  const quoteFor = async (inv: InvoiceRow, m: MerchantRow, body: unknown): Promise<Quote> => {
+    assertPayable(inv);
     const sel = parse(PaymentSelection, body);
-    const opt = options(config.network, inv, m).find((o) => o.chain === sel.chain && o.token === sel.token);
+    const opt = options(config.network, inv, await receivingAddresses(db, m)).find((o) => o.chain === sel.chain && o.token === sel.token);
     if (!opt) throw new HttpError(422, "option_unavailable", `${sel.token} on ${sel.chain} is not accepted for this invoice`);
     const units = usdToUnits(inv.amountUsd, opt.decimals);
-    const to = (chainFamily(opt.chain) === "evm" ? m.evmWallet : m.solanaWallet)!;
-    return { ...opt, to_address: to, amount: formatUnits(units, opt.decimals), amount_units: units.toString() };
+    return { ...opt, amount: formatUnits(units, opt.decimals), amount_units: units.toString() };
   };
 
   app.get("/v1/checkout/:invoice_id", async (req) => {
@@ -70,7 +74,13 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
       s?.chain && s.txHash
         ? { chain: s.chain as Chain, tx_hash: s.txHash, explorer_url: chainInfo(config.network, s.chain as Chain).explorerTx(s.txHash), confirmed: !!s.confirmedAt }
         : null;
-    return toCheckoutInvoice(invoice, merchant.businessName, { payment_options: options(config.network, invoice, merchant), payment });
+    const opts = options(config.network, invoice, await receivingAddresses(db, merchant));
+    return toCheckoutInvoice(invoice, merchant.businessName, {
+      // The receiving address is revealed with the intent, not in the listing.
+      payment_options: opts.map(({ to_address: _, ...o }) => o),
+      fiat_methods: await fiatMethods(partners, merchant, invoice, opts),
+      payment,
+    });
   });
 
   // Checkout POSTs are naturally idempotent (intents are reused) and have no merchant scope.
@@ -78,12 +88,12 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
 
   app.post("/v1/checkout/:invoice_id/quote", noIdem, async (req) => {
     const { invoice, merchant } = await load(req.params);
-    return quoteFor(invoice, merchant, req.body);
+    return await quoteFor(invoice, merchant, req.body);
   });
 
   app.post("/v1/checkout/:invoice_id/onchain-intent", noIdem, async (req, reply) => {
     const { invoice, merchant } = await load(req.params);
-    const quote = quoteFor(invoice, merchant, req.body);
+    const quote = await quoteFor(invoice, merchant, req.body);
     const body = parse(OnchainIntentBody, req.body);
     if (walletFamily(body.payer_address) !== chainFamily(body.chain)) {
       throw new HttpError(422, "payer_wallet_mismatch", `Connect a ${chainInfo(config.network, body.chain).name} wallet to pay on this chain`);
@@ -138,5 +148,16 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
     await db.update(invoices).set({ buyerWallet: payer }).where(eq(invoices.id, invoice.id));
     return reply.code(201).send(toResponse(intent));
   });
-}
 
+  // Fiat via licensed partners: bank transfer (Bridge) or card (MoonPay).
+  app.post("/v1/checkout/:invoice_id/fiat-session", noIdem, async (req, reply) => {
+    const { invoice, merchant } = await load(req.params);
+    assertPayable(invoice);
+    const body = parse(FiatSessionBody, req.body);
+    const session =
+      body.method === "bank_transfer"
+        ? await createBankTransferSession(partners, merchant, invoice, body.rail)
+        : await createCardSession(partners, merchant, invoice, body.chain, body.token);
+    return reply.code(201).send(session);
+  });
+}
