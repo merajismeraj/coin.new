@@ -1,0 +1,25 @@
+{
+  "name": "coin.new",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "pnpm custody-guard && eslint .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "custody-guard": "node scripts/custody-guard.mjs && node --test scripts/custody-guard.test.mjs",
+    "db:migrate": "pnpm --filter @coinnew/db migrate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "turbo": "^2.11.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1"
+  }
+}
