@@ -39,12 +39,19 @@ export function OnboardingForm({ idem }: { idem: string }) {
         <Field label="Work email" error={f.email}>
           <Input name="email" type="email" required />
         </Field>
-        <Field label="Country" hint="ISO code, e.g. AE, US, GB" error={f.country_code}>
-          <Input name="country_code" required maxLength={2} className="uppercase" placeholder="AE" />
+        <Field label="Country of incorporation" hint="Two-letter ISO code, e.g. US, GB, SG, AE, BR" error={f.country_code}>
+          <Input name="country_code" required maxLength={2} className="uppercase" placeholder="US" />
         </Field>
-        <Field label="Receiving wallet" hint="An address you control (EVM 0x… or Solana). Payments settle here directly." error={f.default_receiving_wallet}>
-          <Input name="default_receiving_wallet" required className="font-mono" placeholder="0x…" />
-        </Field>
+        <fieldset className="space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+          <legend className="px-1 text-sm font-medium">Receiving wallets</legend>
+          <p className="text-xs text-zinc-500">Addresses you control. Buyers pay straight into them. Add at least one.</p>
+          <Field label="Ethereum · Base · Polygon" error={f.receiving_wallets}>
+            <Input name="evm_wallet" className="font-mono" placeholder="0x…" autoComplete="off" />
+          </Field>
+          <Field label="Solana">
+            <Input name="solana_wallet" className="font-mono" placeholder="Base58 address" autoComplete="off" />
+          </Field>
+        </fieldset>
         <SubmitButton pendingText="Creating…">Create account</SubmitButton>
       </form>
     </Card>

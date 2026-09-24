@@ -40,10 +40,10 @@ export function NewInvoiceForm({ idem, chains }: { idem: string; chains: Chain[]
         <Field label="Buyer email" hint="Optional" error={f.buyer_email}>
           <Input name="buyer_email" type="email" placeholder="ap@client.com" />
         </Field>
-        <Field label="Accepted tokens" error={f.accepted_tokens}>
+        <Field label="Accepted tokens" hint="Only official issuances are offered per chain (e.g. no USDT on Base)" error={f.accepted_tokens}>
           <Checkboxes name="accepted_tokens" options={TOKENS} />
         </Field>
-        <Field label="Accepted chains" hint="Limited to chains your receiving wallet supports" error={f.accepted_chains}>
+        <Field label="Accepted chains" hint="Chains you’ve enabled in Settings" error={f.accepted_chains}>
           <Checkboxes name="accepted_chains" options={chains} labels={CHAIN_LABEL} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">

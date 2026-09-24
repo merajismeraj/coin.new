@@ -76,8 +76,19 @@ export default async function InvoicePage({ params }: { params: { id: string } }
             <ul className="space-y-3 text-sm">
               {inv.settlements.map((s) => (
                 <li key={s.id} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-                  <div className="font-medium">{s.amount} {s.token} <span className="text-zinc-500">via {s.chain ?? s.rail}</span></div>
-                  {s.tx_hash && <div className="mt-1 truncate font-mono text-xs text-zinc-500">{s.tx_hash}</div>}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{s.amount} {s.token} <span className="font-normal capitalize text-zinc-500">on {s.chain ?? s.rail}</span></span>
+                    <span className={s.confirmed_at ? "text-xs text-emerald-700 dark:text-emerald-400" : "text-xs text-amber-700 dark:text-amber-400"}>
+                      {s.confirmed_at ? "Confirmed" : "Confirming…"}
+                    </span>
+                  </div>
+                  {s.from_address && <div className="mt-1 truncate font-mono text-xs text-zinc-500">from {s.from_address}</div>}
+                  {s.tx_hash && <div className="mt-1 truncate font-mono text-xs text-zinc-500">tx {s.tx_hash}</div>}
+                  {s.risk_flags.length > 0 && (
+                    <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950 dark:text-red-300">
+                      Flagged: {s.risk_flags.join(", ").replace(/_/g, " ")}. Review before fulfilling; consult counsel on handling these funds.
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

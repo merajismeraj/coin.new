@@ -8,6 +8,8 @@ import type { Config } from "../config.js";
 import { HttpError, isUniqueViolation, parse } from "../lib/errors.js";
 import { effectiveStatus, toInvoice, toSettlement } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
+import { enqueueWebhook } from "../services/webhooks.js";
+import { supportedPairs } from "@coinnew/chains";
 
 const IdParams = z.object({ id: z.string().uuid() });
 
@@ -45,6 +47,9 @@ export async function invoiceRoutes(app: FastifyInstance, { db, config }: { db: 
     const unsupported = chains.filter((c) => !allowed.includes(c));
     if (unsupported.length) {
       throw new HttpError(422, "chain_not_enabled", `Chains not enabled for this merchant: ${unsupported.join(", ")}`);
+    }
+    if (!supportedPairs(config.network, chains, body.accepted_tokens).length) {
+      throw new HttpError(422, "no_payment_option", `None of ${body.accepted_tokens.join("/")} is supported on ${chains.join(", ")}`);
     }
 
     const id = randomUUID();
@@ -117,6 +122,8 @@ export async function invoiceRoutes(app: FastifyInstance, { db, config }: { db: 
       .where(and(eq(invoices.id, id), eq(invoices.status, "pending")))
       .returning();
     if (!updated) throw new HttpError(409, "invalid_state", "Invoice state changed, refresh and retry");
-    return toInvoice(updated);
+    const invoice = toInvoice(updated);
+    await enqueueWebhook(db, { merchantId: updated.merchantId, invoiceId: id, type: "invoice.canceled", data: invoice });
+    return invoice;
   });
 }

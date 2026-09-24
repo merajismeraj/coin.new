@@ -1,5 +1,7 @@
 import { integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
+// numeric(78,0) columns hold uint256 base units; drizzle returns them as strings.
+
 // Mirrors migrations/0001_init.sql. Keep the two in sync.
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -9,11 +11,13 @@ export const merchants = pgTable("merchants", {
   businessName: text("business_name").notNull(),
   email: text("email").notNull().unique(),
   countryCode: text("country_code").notNull(),
-  defaultReceivingWallet: text("default_receiving_wallet").notNull(),
+  evmWallet: text("evm_wallet"),
+  solanaWallet: text("solana_wallet"),
   preferredChains: text("preferred_chains").array().notNull(),
   payoutPreference: text("payout_preference").notNull().default("crypto"),
   partnerRailCustomerId: text("partner_rail_customer_id"),
   webhookUrl: text("webhook_url"),
+  webhookSigningSecret: text("webhook_signing_secret"),
   createdAt: createdAt(),
 });
 
@@ -42,9 +46,28 @@ export const invoices = pgTable("invoices", {
   createdAt: createdAt(),
 });
 
+export const paymentIntents = pgTable("payment_intents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  chain: text("chain").notNull(),
+  token: text("token").notNull(),
+  tokenAddress: text("token_address").notNull(),
+  decimals: integer("decimals").notNull(),
+  toAddress: text("to_address").notNull(),
+  amountUnits: numeric("amount_units", { precision: 78, scale: 0 }).notNull(),
+  payerAddress: text("payer_address"),
+  status: text("status").notNull().default("open"),
+  startBlock: numeric("start_block", { precision: 78, scale: 0 }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+});
+
 export const settlements = pgTable("settlements", {
   id: uuid("id").primaryKey().defaultRandom(),
   invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  intentId: uuid("intent_id").references(() => paymentIntents.id),
+  logIndex: integer("log_index"),
+  riskFlags: text("risk_flags").array().notNull().default([]),
   rail: text("rail").notNull(),
   chain: text("chain"),
   txHash: text("tx_hash"),
@@ -65,6 +88,10 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   payload: jsonb("payload").notNull(),
   status: text("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lastError: text("last_error"),
+  responseStatus: integer("response_status"),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -80,3 +107,15 @@ export const idempotencyKeys = pgTable(
   },
   (t) => [primaryKey({ columns: [t.scope, t.key] })],
 );
+
+export const inboundEvents = pgTable("inbound_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  source: text("source").notNull(),
+  chain: text("chain").notNull(),
+  txHash: text("tx_hash").notNull(),
+  payload: jsonb("payload").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+});

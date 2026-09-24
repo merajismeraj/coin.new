@@ -24,7 +24,7 @@ export async function onboard(_: OnboardState, form: FormData): Promise<OnboardS
         business_name: str(form, "business_name"),
         email: str(form, "email"),
         country_code: str(form, "country_code"),
-        default_receiving_wallet: str(form, "default_receiving_wallet"),
+        receiving_wallets: { evm: str(form, "evm_wallet") ?? null, solana: str(form, "solana_wallet") ?? null },
       },
     });
     setSession(res.api_key.key);
@@ -93,8 +93,9 @@ export async function updateMerchant(_: FormState & { saved?: boolean }, form: F
       method: "PATCH",
       idem: str(form, "idem"),
       body: {
-        default_receiving_wallet: str(form, "default_receiving_wallet"),
-        preferred_chains: form.getAll("preferred_chains"),
+        receiving_wallets: { evm: str(form, "evm_wallet") ?? null, solana: str(form, "solana_wallet") ?? null },
+        // Chains for a wallet family that was just added are enabled server-side.
+        ...(form.getAll("preferred_chains").length && { preferred_chains: form.getAll("preferred_chains") }),
         webhook_url: str(form, "webhook_url") ?? null,
       },
     });
@@ -130,5 +131,10 @@ export async function revokeApiKey(id: string) {
     clearSession();
     redirect("/login");
   }
+  revalidatePath("/settings");
+}
+
+export async function rotateWebhookSecret() {
+  await authedApi("/v1/merchants/me/webhook-secret/rotate", { method: "POST" });
   revalidatePath("/settings");
 }
