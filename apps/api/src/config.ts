@@ -24,6 +24,9 @@ export interface Config {
     /** Allow merchant webhook URLs that resolve to private/loopback IPs (local dev and tests only). */
     allowPrivateTargets: boolean;
   };
+  /** Licensed partner rails; null when not configured. */
+  bridge: { apiKey: string; baseUrl: string; webhookPublicKey: string } | null;
+  moonpay: { publishableKey: string; urlSigningSecret: string; webhookKey: string; sandbox: boolean } | null;
   /** How long the checkout shows a payment intent as valid. */
   intentTtlMinutes: number;
 }
@@ -48,6 +51,21 @@ export function loadConfig(env = process.env): Config {
       failClosed: env.SCREENING_FAIL_CLOSED === "1",
     },
     webhooks: { allowPrivateTargets: env.WEBHOOKS_ALLOW_PRIVATE === "1" },
+    bridge: env.BRIDGE_API_KEY
+      ? {
+          apiKey: env.BRIDGE_API_KEY,
+          baseUrl: env.BRIDGE_API_URL ?? (network === "mainnet" ? "https://api.bridge.xyz" : "https://api.sandbox.bridge.xyz"),
+          webhookPublicKey: (env.BRIDGE_WEBHOOK_PUBLIC_KEY ?? "").replace(/\\n/g, "\n"),
+        }
+      : null,
+    moonpay: env.MOONPAY_PUBLISHABLE_KEY
+      ? {
+          publishableKey: env.MOONPAY_PUBLISHABLE_KEY,
+          urlSigningSecret: env.MOONPAY_SECRET_KEY ?? "",
+          webhookKey: env.MOONPAY_WEBHOOK_KEY ?? "",
+          sandbox: network !== "mainnet",
+        }
+      : null,
     intentTtlMinutes: 30,
   };
 }

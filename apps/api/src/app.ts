@@ -10,6 +10,9 @@ import { checkoutRoutes } from "./routes/checkout.js";
 import { indexerWebhookRoutes } from "./routes/indexer-webhooks.js";
 import type { PaymentDeps } from "./services/payments.js";
 import type { WalletScreener } from "./services/screening.js";
+import type { PartnerDeps } from "./services/partners.js";
+import { BridgeClient, type BridgeApi } from "./rails/bridge.js";
+import { partnerWebhookRoutes } from "./routes/partner-webhooks.js";
 import { invoiceRoutes } from "./routes/invoices.js";
 import { merchantRoutes } from "./routes/merchants.js";
 
@@ -20,10 +23,14 @@ export interface AppDeps {
   config: Config;
   verifier: ChainVerifier;
   screener: WalletScreener;
+  /** Override the Bridge client (tests); defaults to one built from config. */
+  bridge?: BridgeApi | null;
   logger?: FastifyServerOptions["logger"];
 }
 
-export async function buildApp({ db, config, verifier, screener, logger = true }: AppDeps) {
+export const bridgeFromConfig = (config: Config): BridgeApi | null => (config.bridge ? new BridgeClient(config.bridge.apiKey, config.bridge.baseUrl) : null);
+
+export async function buildApp({ db, config, verifier, screener, bridge = bridgeFromConfig(config), logger = true }: AppDeps) {
   const app = Fastify({
     trustProxy: config.trustedProxies.length ? config.trustedProxies : false,
     logger: logger && {
@@ -75,10 +82,12 @@ export async function buildApp({ db, config, verifier, screener, logger = true }
   registerIdempotency(app, db);
 
   app.get("/health", async () => ({ ok: true }));
-  await app.register(merchantRoutes, { db });
+  const partners: PartnerDeps = { db, config, bridge, verifier, screener, log: app.log };
+  await app.register(merchantRoutes, { db, partners });
   await app.register(invoiceRoutes, { db, config });
   const payments: PaymentDeps = { db, verifier, screener, network: config.network, log: app.log };
-  await app.register(checkoutRoutes, { db, config, payments });
+  await app.register(checkoutRoutes, { db, config, payments, partners });
+  await app.register(partnerWebhookRoutes, { db, config });
   await app.register(indexerWebhookRoutes, { db, config });
   return app;
 }

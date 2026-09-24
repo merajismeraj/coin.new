@@ -8,6 +8,8 @@ import type { Chain } from "@coinnew/shared-types";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import type { PaymentDeps } from "../src/services/payments.js";
+import type { BridgeApi } from "../src/rails/bridge.js";
+import type { PartnerDeps } from "../src/services/partners.js";
 import { DenylistScreener } from "../src/services/screening.js";
 
 export const EVM_WALLET = "0x1111111111111111111111111111111111111111";
@@ -51,10 +53,11 @@ export interface Ctx {
   chain: FakeChain;
   config: Config;
   payments: PaymentDeps;
+  partners: PartnerDeps;
   close: () => Promise<void>;
 }
 
-export async function setup(overrides: Partial<Config> = {}): Promise<Ctx> {
+export async function setup(overrides: Partial<Config> = {}, opts: { bridge?: BridgeApi | null } = {}): Promise<Ctx> {
   const { db, close } = await createTestDb();
   const config: Config = {
     ...loadConfig({ CHECKOUT_BASE_URL: "https://pay.test", NETWORK: "mainnet", ALCHEMY_SIGNING_KEYS: "whsk_test", HELIUS_AUTH_HEADER: "Bearer helius-test" }),
@@ -63,9 +66,10 @@ export async function setup(overrides: Partial<Config> = {}): Promise<Ctx> {
   };
   const chain = new FakeChain();
   const screener = new DenylistScreener([SANCTIONED_EVM]);
-  const app = await buildApp({ db, config, verifier: chain, screener, logger: false });
+  const app = await buildApp({ db, config, verifier: chain, screener, bridge: opts.bridge ?? null, logger: false });
   const payments: PaymentDeps = { db, verifier: chain, screener, network: config.network };
-  return { app, db, chain, config, payments, close: async () => (await app.close(), await close()) };
+  const partners: PartnerDeps = { db, config, bridge: opts.bridge ?? null, verifier: chain, screener };
+  return { app, db, chain, config, payments, partners, close: async () => (await app.close(), await close()) };
 }
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";

@@ -4,6 +4,8 @@ import { loadConfig } from "./config.js";
 import { productionDeps } from "./deps.js";
 import { closeStaleIntents, processInboundEvents, recheckUnconfirmed, scanOpenIntents, type PaymentDeps } from "./services/payments.js";
 import { deliverDueWebhooks } from "./services/webhooks.js";
+import { processPartnerEvents, type PartnerDeps } from "./services/partners.js";
+import { bridgeFromConfig } from "./app.js";
 
 // Background jobs, Postgres-backed (no Redis needed yet). Run exactly one
 // worker process; jobs are idempotent but not coordinated across workers.
@@ -15,6 +17,7 @@ const config = loadConfig();
 const log = pino({ name: "worker" });
 const { db, close } = createDb(url);
 const deps: PaymentDeps = { db, network: config.network, log, ...productionDeps(config) };
+const partners: PartnerDeps = { db, config, log, bridge: bridgeFromConfig(config), verifier: deps.verifier, screener: deps.screener };
 
 let stopping = false;
 function every(name: string, ms: number, job: () => Promise<unknown>) {
@@ -34,6 +37,7 @@ every("inbound-events", 2_000, () => processInboundEvents(deps));
 every("recheck-unconfirmed", 15_000, () => recheckUnconfirmed(deps));
 every("fallback-scan", 30_000, () => scanOpenIntents(deps));
 every("close-stale-intents", 5 * 60_000, () => closeStaleIntents(db));
+every("partner-events", 3_000, () => processPartnerEvents(partners));
 every("webhook-delivery", 5_000, () => deliverDueWebhooks(db, { allowPrivateTargets: config.webhooks.allowPrivateTargets }));
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

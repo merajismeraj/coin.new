@@ -1,8 +1,7 @@
 import type { CheckoutInvoice } from "@coinnew/shared-types";
 import { notFound } from "next/navigation";
 import { Countdown } from "@/components/countdown";
-import { PayPanel } from "@/components/pay-panel";
-import { Providers } from "@/components/providers";
+import { CheckoutMethods } from "@/components/checkout-methods";
 import { getCheckoutInvoice } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +12,9 @@ function Closed({ inv }: { inv: CheckoutInvoice }) {
   const copy: Partial<Record<CheckoutInvoice["status"], [string, string]>> = {
     pending: ["Payment unavailable", `This invoice has no payment method available. Contact ${inv.merchant_name}.`],
     paid: ["Paid", "This invoice has been paid. Thank you!"],
-    processing: ["Payment detected", "We’re waiting for final confirmation on-chain."],
+    processing: inv.payment
+      ? ["Payment detected", "We’re waiting for final confirmation on-chain."]
+      : ["Payment received", "Your bank payment has arrived and is being settled. No further action needed."],
     expired: ["Invoice expired", `Ask ${inv.merchant_name} to send a new payment link.`],
     canceled: ["Invoice canceled", `This invoice was canceled by ${inv.merchant_name}.`],
   };
@@ -48,17 +49,15 @@ export default async function CheckoutPage({ params }: { params: { id: string } 
 
         <hr className="my-5 border-zinc-100 dark:border-zinc-800" />
 
-        {inv.status === "pending" && inv.payment_options.length > 0 ? (
-          <Providers>
-            <PayPanel invoice={inv} />
-          </Providers>
+        {inv.status === "pending" && (inv.payment_options.length > 0 || inv.fiat_methods.length > 0) ? (
+          <CheckoutMethods invoice={inv} />
         ) : (
           <Closed inv={inv} />
         )}
       </div>
 
       <p className="px-2 text-center text-xs leading-relaxed text-zinc-500">
-        Payments go directly from your wallet to {inv.merchant_name}. coin.new never holds your funds.
+        Crypto payments go directly from your wallet to {inv.merchant_name}. Bank and card payments are handled by licensed partners. coin.new never holds your funds.
       </p>
       <p className="text-center text-xs text-zinc-400">
         Powered by coin<span className="text-brand">.new</span>

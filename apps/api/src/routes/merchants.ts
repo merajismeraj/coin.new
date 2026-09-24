@@ -20,6 +20,8 @@ import { HttpError, isUniqueViolation, parse } from "../lib/errors.js";
 import { toApiKey, toMerchant } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
 import { newSigningSecret } from "../services/webhooks.js";
+import { addBankAccount, enableFiatPayout, getPartnerStatus, startOnboarding, type PartnerDeps } from "../services/partners.js";
+import { BankAccountBody } from "@coinnew/shared-types";
 
 const REDACTED = "[redacted: shown once at creation]";
 
@@ -45,7 +47,7 @@ async function issueKey(db: Db, merchantId: string, label: string | null): Promi
   return { ...toApiKey(row!), key: key.plaintext };
 }
 
-export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
+export async function merchantRoutes(app: FastifyInstance, { db, partners }: { db: Db; partners: PartnerDeps }) {
   // Public onboarding. Returns the first API key exactly once.
   app.post(
     "/v1/merchants",
@@ -108,8 +110,9 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
         CHAINS.filter((c) => has.has(chainFamily(c)) && ((current.preferredChains as Chain[]).includes(c) || !had.has(chainFamily(c))));
       const preferredChains = resolveChains(wallets, chains.length ? chains : undefined);
 
-      if (body.payout_preference === "fiat_via_partner" && !current.partnerRailCustomerId) {
-        throw new HttpError(422, "partner_rail_required", "Fiat payout requires onboarding with a licensed partner rail first");
+      // Fiat payout routes checkout payments to partner liquidation addresses; provision them first.
+      if (body.payout_preference === "fiat_via_partner") {
+        await enableFiatPayout(partners, { ...current, preferredChains });
       }
       const [m] = await db
         .update(merchants)
@@ -142,6 +145,19 @@ export async function merchantRoutes(app: FastifyInstance, { db }: { db: Db }) {
         await db.update(merchants).set({ webhookSigningSecret: secret }).where(eq(merchants.id, req.merchantId!));
         return { secret };
       },
+    );
+
+    // ---- Licensed partner (Bridge): KYB, payout bank account -------------------
+    authed.get("/v1/merchants/me/partner", async (req) => getPartnerStatus(partners, req.merchantId!));
+
+    authed.post("/v1/merchants/me/partner/onboarding", async (req) => {
+      const body = parse(z.object({ redirect_uri: z.string().url().optional() }), req.body ?? {});
+      return startOnboarding(partners, await loadMe(req.merchantId!), body.redirect_uri);
+    });
+
+    // Bank details pass through to the partner; only its id and last 4 digits are kept.
+    authed.post("/v1/merchants/me/partner/bank-account", async (req) =>
+      addBankAccount(partners, await loadMe(req.merchantId!), parse(BankAccountBody, req.body)),
     );
 
     authed.get("/v1/merchants/me/api-keys", async (req) => {
