@@ -28,7 +28,7 @@ export const RULES = [
 
 const SCAN_DIRS = ["apps", "packages"];
 const EXTS = /\.(ts|tsx|js|jsx|mjs|cjs|sql|sol)$/;
-const SKIP_DIRS = new Set(["node_modules", ".next", "dist", ".turbo"]);
+const SKIP_DIRS = new Set(["node_modules", ".next", "dist", ".turbo", ".vercel"]);
 const ALLOW = /custody-guard-allow:\s*\S+/;
 
 function* walk(dir) {

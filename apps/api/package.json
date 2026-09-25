@@ -8,7 +8,8 @@
     "start": "tsx src/server.ts",
     "worker": "tsx src/worker.ts",
     "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vercel-build": "node scripts/vercel-build.mjs"
   },
   "dependencies": {
     "@coinnew/chains": "workspace:*",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
+    "esbuild": "0.28.2",
     "tsx": "^4.23.15",
     "vitest": "^5.0.1"
   }

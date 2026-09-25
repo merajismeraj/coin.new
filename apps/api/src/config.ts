@@ -4,7 +4,7 @@ import { CHAINS, type Chain } from "@coinnew/shared-types";
 export interface Config {
   checkoutBaseUrl: string;
   /** Proxy IPs/CIDRs (e.g. the checkout app) whose X-Forwarded-For is trusted, so rate limits apply per buyer IP. */
-  trustedProxies: string[];
+  trustedProxies: string[] | "all";
   network: Network;
   rpcUrls: Partial<Record<Chain, string>>;
   rateLimit: { enabled: boolean; readsPerMinute: number; writesPerMinute: number };
@@ -32,6 +32,14 @@ export interface Config {
   email: { resendApiKey: string | null; from: string; dashboardUrl: string };
   /** How long the checkout shows a payment intent as valid. */
   intentTtlMinutes: number;
+  /** Bearer secret for /internal/cron/tick (Vercel Cron sends it). The route is off when unset. */
+  cronSecret: string | null;
+  /**
+   * Process indexer and partner webhooks as soon as they're stored, not on the
+   * next worker pass. For serverless deployments, where the job runner may fire
+   * only every minute (or less often).
+   */
+  inlineWebhookProcessing: boolean;
 }
 
 // Alchemy's per-network hosts; one app key works on every network enabled for the app.
@@ -47,7 +55,8 @@ export function loadConfig(env = process.env): Config {
   const network = env.NETWORK === "mainnet" ? "mainnet" : "testnet";
   return {
     checkoutBaseUrl: (env.CHECKOUT_BASE_URL ?? "http://localhost:3001").replace(/\/$/, ""),
-    trustedProxies: list(env.TRUSTED_PROXIES),
+    // "*" trusts any proxy: only for platforms whose edge overwrites X-Forwarded-For (e.g. Vercel).
+    trustedProxies: env.TRUSTED_PROXIES === "*" ? "all" : list(env.TRUSTED_PROXIES),
     network,
     // Explicit RPC_URL_<CHAIN> wins; otherwise one ALCHEMY_API_KEY covers every chain.
     rpcUrls: Object.fromEntries(
@@ -92,5 +101,7 @@ export function loadConfig(env = process.env): Config {
       dashboardUrl: (env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     },
     intentTtlMinutes: 30,
+    cronSecret: env.CRON_SECRET || null,
+    inlineWebhookProcessing: env.INLINE_WEBHOOK_PROCESSING === "1",
   };
 }

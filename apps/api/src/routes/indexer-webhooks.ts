@@ -22,7 +22,7 @@ const rawBody = (req: FastifyRequest) => (req as FastifyRequest & { rawBody?: st
  * to learn *which transaction to verify on-chain*. Nothing in them is trusted
  * as proof of payment.
  */
-export async function indexerWebhookRoutes(app: FastifyInstance, { db, config }: { db: Db; config: Config }) {
+export async function indexerWebhookRoutes(app: FastifyInstance, { db, config, processNow }: { db: Db; config: Config; processNow?: () => Promise<unknown> }) {
   const managedKeys = alchemySigningKeyCache(db);
   const store = async (source: string, chain: Chain, hashes: string[], payload: unknown) => {
     const unique = [...new Set(hashes.filter((h) => typeof h === "string" && h.length > 0 && h.length < 128))];
@@ -31,6 +31,8 @@ export async function indexerWebhookRoutes(app: FastifyInstance, { db, config }:
         .insert(inboundEvents)
         .values(unique.map((txHash) => ({ source, chain, txHash, payload: payload as object })))
         .onConflictDoNothing();
+      // Stored first, so a failure here only delays the event to the next job pass.
+      if (processNow) await processNow().catch((err: unknown) => app.log.error({ source, err }, "inline processing failed; left for the job runner"));
     }
     return { accepted: unique.length };
   };

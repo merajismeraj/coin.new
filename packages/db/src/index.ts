@@ -10,7 +10,9 @@ export { schema };
 /** Driver-agnostic handle: postgres-js in production, PGlite in tests. */
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-export function createDb(url: string): { db: Db; close: () => Promise<void> } {
-  const client = postgres(url, { max: 10 });
+export function createDb(url: string, opts: { max?: number } = {}): { db: Db; close: () => Promise<void> } {
+  // Transaction-mode poolers (Neon's "-pooler" host, PgBouncer) don't support prepared statements.
+  const pooled = /-pooler\.|pgbouncer=true/.test(url);
+  const client = postgres(url, { max: opts.max ?? 10, prepare: !pooled });
   return { db: drizzle(client, { schema }), close: () => client.end() };
 }

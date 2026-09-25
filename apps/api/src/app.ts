@@ -16,6 +16,10 @@ import { partnerWebhookRoutes } from "./routes/partner-webhooks.js";
 import { reconciliationRoutes } from "./routes/reconciliation.js";
 import { invoiceRoutes } from "./routes/invoices.js";
 import { merchantRoutes } from "./routes/merchants.js";
+import { cronRoutes } from "./routes/cron.js";
+import { buildJobs } from "./jobs.js";
+import { processInboundEvents } from "./services/payments.js";
+import { processPartnerEvents } from "./services/partners.js";
 
 const WRITE_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
@@ -33,7 +37,7 @@ export const bridgeFromConfig = (config: Config): BridgeApi | null => (config.br
 
 export async function buildApp({ db, config, verifier, screener, bridge = bridgeFromConfig(config), logger = true }: AppDeps) {
   const app = Fastify({
-    trustProxy: config.trustedProxies.length ? config.trustedProxies : false,
+    trustProxy: config.trustedProxies === "all" ? true : config.trustedProxies.length ? config.trustedProxies : false,
     logger: logger && {
       // Never log API keys (spec §7.1).
       redact: ["req.headers.authorization"],
@@ -88,8 +92,10 @@ export async function buildApp({ db, config, verifier, screener, bridge = bridge
   await app.register(invoiceRoutes, { db, config });
   const payments: PaymentDeps = { db, verifier, screener, network: config.network, dashboardUrl: config.email.dashboardUrl, log: app.log };
   await app.register(checkoutRoutes, { db, config, payments, partners });
-  await app.register(partnerWebhookRoutes, { db, config });
+  const inline = config.inlineWebhookProcessing;
+  await app.register(partnerWebhookRoutes, { db, config, processNow: inline ? () => processPartnerEvents(partners) : undefined });
   await app.register(reconciliationRoutes, { db, payments });
-  await app.register(indexerWebhookRoutes, { db, config });
+  await app.register(indexerWebhookRoutes, { db, config, processNow: inline ? () => processInboundEvents(payments) : undefined });
+  if (config.cronSecret) await app.register(cronRoutes, { secret: config.cronSecret, jobs: buildJobs({ db, config, payments, partners, log: app.log }) });
   return app;
 }

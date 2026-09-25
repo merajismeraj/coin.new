@@ -1,20 +1,14 @@
 import { createDb } from "@coinnew/db";
 import pino from "pino";
+import { bridgeFromConfig } from "./app.js";
 import { loadConfig } from "./config.js";
 import { productionDeps } from "./deps.js";
-import { closeStaleIntents, processInboundEvents, recheckUnconfirmed, scanOpenIntents, type PaymentDeps } from "./services/payments.js";
-import { deliverDueWebhooks } from "./services/webhooks.js";
-import { processPartnerEvents, type PartnerDeps } from "./services/partners.js";
-import { deliverEmails, LogSender, ResendSender } from "./services/email.js";
-import { expireInvoices, sendExpiryReminders } from "./services/jobs.js";
-import { purgeIdempotencyKeys } from "./plugins/idempotency.js";
-import { AlchemyNotifyClient } from "./indexers/alchemy-notify.js";
-import { syncAlchemyAddresses } from "./services/alchemy-sync.js";
-import { bridgeFromConfig } from "./app.js";
+import { buildJobs } from "./jobs.js";
+import type { PartnerDeps } from "./services/partners.js";
+import type { PaymentDeps } from "./services/payments.js";
 
-// Background jobs, Postgres-backed (no Redis needed). Safe to run as several
-// processes: queue-like jobs claim rows with FOR UPDATE SKIP LOCKED + leases,
-// and state transitions are conditional UPDATEs that happen exactly once.
+// Always-on worker for server deployments. Serverless deployments run the same
+// jobs from the cron tick (/internal/cron/tick) instead.
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is required");
@@ -22,43 +16,22 @@ if (!url) throw new Error("DATABASE_URL is required");
 const config = loadConfig();
 const log = pino({ name: "worker" });
 const { db, close } = createDb(url);
-const deps: PaymentDeps = { db, network: config.network, dashboardUrl: config.email.dashboardUrl, log, ...productionDeps(config) };
-const emailSender = config.email.resendApiKey ? new ResendSender(config.email.resendApiKey) : new LogSender(log);
-const partners: PartnerDeps = { db, config, log, bridge: bridgeFromConfig(config), verifier: deps.verifier, screener: deps.screener };
+const payments: PaymentDeps = { db, network: config.network, dashboardUrl: config.email.dashboardUrl, log, ...productionDeps(config) };
+const partners: PartnerDeps = { db, config, log, bridge: bridgeFromConfig(config), verifier: payments.verifier, screener: payments.screener };
 
 let stopping = false;
-function every(name: string, ms: number, job: () => Promise<unknown>) {
+for (const job of buildJobs({ db, config, payments, partners, log })) {
   const tick = async () => {
     if (stopping) return;
     try {
-      await job();
+      await job.run();
     } catch (err) {
-      log.error({ job: name, err }, "job failed");
+      log.error({ job: job.name, err }, "job failed");
     }
-    if (!stopping) setTimeout(tick, ms);
+    if (!stopping) setTimeout(tick, job.everyMs);
   };
   void tick();
 }
-
-every("inbound-events", 2_000, () => processInboundEvents(deps));
-every("recheck-unconfirmed", 15_000, () => recheckUnconfirmed(deps));
-every("fallback-scan", 30_000, () => scanOpenIntents(deps));
-every("close-stale-intents", 5 * 60_000, () => closeStaleIntents(db));
-every("partner-events", 3_000, () => processPartnerEvents(partners));
-every("expire-invoices", 60_000, () => expireInvoices(db));
-every("expiry-reminders", 10 * 60_000, () => sendExpiryReminders(db));
-every("email-delivery", 5_000, () => deliverEmails(db, emailSender, config.email.from));
-every("alchemy-address-sync", 30_000, () =>
-  syncAlchemyAddresses({
-    db,
-    network: config.network,
-    api: config.indexers.alchemyNotify ? new AlchemyNotifyClient(config.indexers.alchemyNotify.authToken) : null,
-    webhookUrl: config.indexers.alchemyNotify?.webhookUrl ?? null,
-    log,
-  }),
-);
-every("purge-idempotency-keys", 60 * 60_000, () => purgeIdempotencyKeys(db));
-every("webhook-delivery", 5_000, () => deliverDueWebhooks(db, { allowPrivateTargets: config.webhooks.allowPrivateTargets }));
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, async () => {

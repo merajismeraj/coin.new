@@ -12,10 +12,12 @@ const rawBody = (req: FastifyRequest) => (req as FastifyRequest & { rawBody?: st
  * the payload is read; payloads are stored verbatim and processed by the
  * worker, which re-reads state from the partner or the chain before acting.
  */
-export async function partnerWebhookRoutes(app: FastifyInstance, { db, config }: { db: Db; config: Config }) {
+export async function partnerWebhookRoutes(app: FastifyInstance, { db, config, processNow }: { db: Db; config: Config; processNow?: () => Promise<unknown> }) {
   const opts = { config: { idempotency: false as const, rateLimit: false as const } };
   const store = async (source: string, eventId: string, payload: unknown) => {
     await db.insert(partnerEvents).values({ source, eventId, payload: payload as object }).onConflictDoNothing();
+    // Stored first, so a failure here only delays the event to the next job pass.
+    if (processNow) await processNow().catch((err: unknown) => app.log.error({ source, err }, "inline processing failed; left for the job runner"));
   };
 
   app.post("/internal/webhooks/bridge", opts, async (req, reply) => {
