@@ -40,7 +40,7 @@ export function invoiceIssued(c: InvoiceCtx): Omit<EmailMessage, "to"> {
       `<p style="font-size:32px;font-weight:700;margin:0">${usd(c.amountUsd)}</p>
        <p style="color:#52525b;margin:4px 0 0">Invoice ${esc(c.invoiceNumber)}${due ? ` · ${esc(due)}` : ""}</p>
        ${button(c.checkoutUrl, "View and pay invoice")}
-       <p style="font-size:13px;color:#52525b">Pay with USDC/USDT from any wallet, or by bank transfer or card where offered.</p>`,
+       <p style="font-size:13px;color:#52525b">Pay with USD stablecoins from any wallet, or by bank transfer or card where offered.</p>`,
       `${NON_CUSTODIAL} Only pay through the link above. coin.new will never ask you to send funds to an address by email.`,
     ),
     text: `${line(c.merchantName)} sent you invoice ${line(c.invoiceNumber)} for ${usd(c.amountUsd)}. ${due}\n\nView and pay: ${c.checkoutUrl}\n\n${NON_CUSTODIAL}`,

@@ -100,7 +100,7 @@ buyer picks chain+token ─▶ POST /v1/checkout/:id/onchain-intent
 buyer's wallet signs ERC-20/SPL transfer ──────────────▶ merchant's own wallet
                                                          (coin.new is never in the path)
 Alchemy / Helius webhook ─▶ inbound_events (signature-verified, stored verbatim)
-fallback scanner (getLogs / signatures) ─┘       │
+fallback scanner (transfers index / signatures) ─┘
                                                   ▼
 worker: read the tx from the chain via RPC ─▶ match (chain, token, to, exact amount)
         < N confirmations → invoice "processing"
@@ -114,8 +114,32 @@ worker: read the tx from the chain via RPC ─▶ match (chain, token, to, exact
   sub-cent reference (≤ $0.009999). Up to 9,999 open intents per (chain, token, receiving address).
   Intents keep matching late payments for 24h, then free their slot.
 - **Tokens:** official issuances only. USDC on Ethereum/Base/Polygon/Solana; USDT on
-  Ethereum/Polygon/Solana (not Base). Testnets: Circle test USDC.
-- **Confirmations:** Ethereum 3, Base 3, Polygon 16 (history of deep reorgs), Solana `finalized`.
+  Ethereum/Polygon/Solana (not Base). Testnets: Circle test USDC. One deliberate exception, on
+  Robinhood Chain (below).
+- **Confirmations:** Ethereum 3, Base 3, Polygon 16 (history of deep reorgs), Robinhood Chain 60
+  (~0.1s blocks, so ~6s), Solana `finalized`.
+- **Fallback scanner:** every 30s, for receiving addresses with open intents. On Alchemy it reads
+  `alchemy_getAssetTransfers` (paginated, from the intent's start block): Alchemy's free tier caps
+  `eth_getLogs` at a 10-block range, which would otherwise disable the fallback on every EVM chain.
+  Other providers use bounded `eth_getLogs`. Transfers already settled or in the reconciliation
+  inbox aren't re-verified.
+
+### Robinhood Chain (opt-in)
+
+Robinhood Chain (Arbitrum Orbit L2, chain id 4663) is never enabled by default; a merchant turns it
+on in Settings. Two tokens, both verified on-chain:
+
+| Token | Contract | Notes |
+|---|---|---|
+| USDG | `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` | Global Dollar (Paxos), the chain's native stablecoin |
+| USDC | `0x80e0e24718dbFcad49ECAA6F1e6C89A190586cA8` | **Bridged**, not issued by Circle: the address the L2GatewayRouter derives for Ethereum USDC; `l1Address()` returns Ethereum USDC |
+
+Bridged USDC is the one exception to "official issuances only", by product decision. It carries
+bridge risk and, at launch, very little supply on the chain, so it is flagged `bridged: true` in
+checkout options and holdings, and checkout warns the buyer. Robinhood Chain is not covered by
+Bridge fiat payout or MoonPay, and it isn't registered with Alchemy Notify (support unverified);
+the fallback scanner detects its payments. Testnet has no verified stablecoin contracts yet, so it
+offers no payment options.
 - **Merchant webhooks:** `invoice.paid`, `invoice.canceled`, `settlement.confirmed`, signed
   `X-coinnew-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "<t>.<body>")>`. Retries with backoff
   for 24h, then dead-lettered. URLs resolving to private/internal IPs are refused (SSRF).

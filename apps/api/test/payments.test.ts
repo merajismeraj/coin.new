@@ -203,6 +203,18 @@ describe("edge cases", () => {
     expect((await invoiceStatus(inv.id)).status).toBe("paid");
   });
 
+  it("doesn't re-verify a transfer already in the reconciliation inbox on later scans", async () => {
+    const inv = await newInvoice();
+    await intent(inv.id);
+    ctx.chain.publish("base", TX(11), [{ logIndex: 1, tokenAddress: BASE_USDC, from: PAYER_EVM, to: EVM_WALLET, amountUnits: 747_500_000n }]);
+    await scanOpenIntents(ctx.payments);
+    const inbox = (await call(ctx.app, "GET", "/v1/unmatched-transfers", { key })).json().data;
+    expect(inbox.map((u: { tx_hash: string }) => u.tx_hash)).toEqual([TX(11)]);
+    const before = ctx.chain.calls;
+    await scanOpenIntents(ctx.payments);
+    expect(ctx.chain.calls).toBe(before);
+  });
+
   it("settles Solana payments via Helius", async () => {
     const inv = await newInvoice({ accepted_chains: ["solana"] });
     const i = (await intent(inv.id, { chain: "solana", payer_address: PAYER_SOL })).json();
@@ -298,5 +310,27 @@ describe("invoice options", () => {
     await intent(inv.id);
     await ctx.db.update(invoices).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invoices.id, inv.id));
     expect((await intent(inv.id)).json().error.code).toBe("not_payable");
+  });
+});
+
+describe("Robinhood Chain", () => {
+  it("settles a USDG payment found by the fallback scanner (no Notify webhook on this chain)", async () => {
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { preferred_chains: ["base", "robinhood"] } });
+    const inv = await newInvoice();
+    const i = (await intent(inv.id, { chain: "robinhood", token: "USDG" })).json() as OnchainIntent;
+    expect(i).toMatchObject({ chain: "robinhood", chain_id: 4663, token: "USDG", token_address: tokenInfo("mainnet", "robinhood", "USDG")!.address, bridged: false, to_address: EVM_WALLET });
+
+    ctx.chain.publish("robinhood", TX(0x4663), [{ logIndex: 0, tokenAddress: i.token_address, from: PAYER_EVM, to: i.to_address, amountUnits: BigInt(i.amount_units) }]);
+    await scanOpenIntents(ctx.payments);
+
+    const done = await invoiceStatus(inv.id);
+    expect(done.status).toBe("paid");
+    expect(done.settlements[0]).toMatchObject({ chain: "robinhood", token: "USDG", tx_hash: TX(0x4663) });
+  });
+
+  it("marks bridged USDC as bridged on the intent", async () => {
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { preferred_chains: ["robinhood"] } });
+    const inv = await newInvoice();
+    expect((await intent(inv.id, { chain: "robinhood", token: "USDC" })).json()).toMatchObject({ token: "USDC", bridged: true, token_address: "0x80e0e24718dbFcad49ECAA6F1e6C89A190586cA8" });
   });
 });

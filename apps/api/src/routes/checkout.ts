@@ -21,6 +21,7 @@ import { effectiveStatus, toCheckoutInvoice } from "../lib/serialize.js";
 import { createIntent, type PaymentDeps } from "../services/payments.js";
 import { createBankTransferSession, createCardSession, fiatMethods, receivingAddresses, type PartnerDeps } from "../services/partners.js";
 import { FiatSessionBody } from "@coinnew/shared-types";
+import { MOONPAY_CURRENCY } from "../rails/moonpay.js";
 
 const MAX_OPEN_INTENTS_PER_INVOICE = 20;
 /** Reuse an existing intent only if the buyer still has this long to pay it. */
@@ -34,7 +35,7 @@ function options(network: Network, inv: InvoiceRow, receiveAt: (c: Chain, t: Tok
     const to = receiveAt(t.chain, t.token);
     if (!to) return [];
     const c = chainInfo(network, t.chain);
-    return [{ chain: t.chain, chain_name: c.name, chain_id: c.chainId, token: t.token, token_address: t.address, decimals: t.decimals, to_address: to }];
+    return [{ chain: t.chain, chain_name: c.name, chain_id: c.chainId, token: t.token, token_address: t.address, decimals: t.decimals, bridged: !!t.bridged, card: !!MOONPAY_CURRENCY[`${t.chain}:${t.token}`], to_address: to }];
   });
 }
 

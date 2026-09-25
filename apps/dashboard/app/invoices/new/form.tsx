@@ -1,12 +1,10 @@
 "use client";
 
-import { TOKENS, type Chain } from "@coinnew/shared-types";
+import { CHAIN_LABELS, TOKENS, type Chain } from "@coinnew/shared-types";
 import { useFormState } from "react-dom";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, ErrorBanner, Field, Input, Select } from "@/components/ui";
 import { createInvoice } from "../../actions";
-
-const CHAIN_LABEL: Record<Chain, string> = { ethereum: "Ethereum", base: "Base", polygon: "Polygon", solana: "Solana" };
 
 function Checkboxes({ name, options, labels }: { name: string; options: readonly string[]; labels?: Record<string, string> }) {
   return (
@@ -24,6 +22,8 @@ function Checkboxes({ name, options, labels }: { name: string; options: readonly
 export function NewInvoiceForm({ idem, chains }: { idem: string; chains: Chain[] }) {
   const [state, action] = useFormState(createInvoice, {});
   const f = state.fields ?? {};
+  // USDG exists only on Robinhood Chain; don't offer it to merchants who haven't enabled that chain.
+  const tokens = TOKENS.filter((t) => t !== "USDG" || chains.includes("robinhood"));
   return (
     <Card>
       <form action={action} className="space-y-5">
@@ -44,11 +44,11 @@ export function NewInvoiceForm({ idem, chains }: { idem: string; chains: Chain[]
           <input type="checkbox" name="notify_buyer" defaultChecked className="accent-brand" />
           Email the invoice to the buyer (with a reminder before it expires)
         </label>
-        <Field label="Accepted tokens" hint="Only official issuances are offered per chain (e.g. no USDT on Base)" error={f.accepted_tokens}>
-          <Checkboxes name="accepted_tokens" options={TOKENS} />
+        <Field label="Accepted tokens" hint="Each token is offered only where it’s listed (e.g. no USDT on Base; USDG only on Robinhood Chain)" error={f.accepted_tokens}>
+          <Checkboxes name="accepted_tokens" options={tokens} />
         </Field>
         <Field label="Accepted chains" hint="Chains you’ve enabled in Settings" error={f.accepted_chains}>
-          <Checkboxes name="accepted_chains" options={chains} labels={CHAIN_LABEL} />
+          <Checkboxes name="accepted_chains" options={chains} labels={CHAIN_LABELS} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Expires in" error={f.expires_in_hours}>

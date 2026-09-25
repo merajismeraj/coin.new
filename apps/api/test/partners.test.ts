@@ -93,6 +93,16 @@ describe("merchant KYB with the partner", () => {
     expect(liq).toEqual(["base:USDC", "ethereum:USDC", "ethereum:USDT", "polygon:USDC", "solana:USDC", "solana:USDT"]);
   });
 
+  it("never provisions Robinhood Chain under fiat payout, so checkout doesn't offer it", async () => {
+    await approveMerchant();
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { preferred_chains: ["base", "robinhood"] } });
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { payout_preference: "fiat_via_partner" } });
+    expect((await partner()).liquidation_addresses.map((l: { chain: string }) => l.chain)).toEqual(["base"]);
+    const inv = await newInvoice({ accepted_chains: ["base", "robinhood"] });
+    const opts = (await call(ctx.app, "GET", `/v1/checkout/${inv.id}`)).json().payment_options;
+    expect(opts.map((o: { chain: string }) => o.chain)).toEqual(["base"]);
+  });
+
   it("routes crypto checkout to the liquidation address under fiat payout", async () => {
     await approveMerchant();
     await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { payout_preference: "fiat_via_partner" } });

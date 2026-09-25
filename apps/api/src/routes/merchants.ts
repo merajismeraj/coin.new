@@ -3,6 +3,7 @@ import {
   chainFamily,
   CHAINS,
   CreateApiKeyBody,
+  OPT_IN_CHAINS,
   CreateMerchantBody,
   UpdateMerchantBody,
   type Chain,
@@ -28,10 +29,13 @@ const REDACTED = "[redacted: shown once at creation]";
 
 const families = (w: ReceivingWallets) => new Set<ChainFamily>([...(w.evm ? ["evm" as const] : []), ...(w.solana ? ["solana" as const] : [])]);
 
-/** Every enabled chain needs a receiving wallet of its family. Defaults to all chains the wallets can receive on. */
+/** Chains enabled when the merchant doesn't choose: every chain of their wallets' families, except opt-in chains. */
+const defaultChainsFor = (have: Set<ChainFamily>) => CHAINS.filter((c) => have.has(chainFamily(c)) && !OPT_IN_CHAINS.includes(c));
+
+/** Every enabled chain needs a receiving wallet of its family. */
 function resolveChains(wallets: ReceivingWallets, requested: Chain[] | undefined): Chain[] {
   const have = families(wallets);
-  if (!requested) return CHAINS.filter((c) => have.has(chainFamily(c)));
+  if (!requested) return defaultChainsFor(have);
   const missing = requested.filter((c) => !have.has(chainFamily(c)));
   if (missing.length) {
     throw new HttpError(422, "chain_wallet_mismatch", `No receiving wallet for: ${missing.join(", ")}. Add a ${chainFamily(missing[0]!)} wallet first.`);
@@ -110,7 +114,7 @@ export async function merchantRoutes(app: FastifyInstance, { db, partners }: { d
       const has = families(wallets);
       const chains =
         body.preferred_chains ??
-        CHAINS.filter((c) => has.has(chainFamily(c)) && ((current.preferredChains as Chain[]).includes(c) || !had.has(chainFamily(c))));
+        CHAINS.filter((c) => has.has(chainFamily(c)) && ((current.preferredChains as Chain[]).includes(c) || (!had.has(chainFamily(c)) && defaultChainsFor(has).includes(c))));
       const preferredChains = resolveChains(wallets, chains.length ? chains : undefined);
 
       // Fiat payout routes checkout payments to partner liquidation addresses; provision them first.

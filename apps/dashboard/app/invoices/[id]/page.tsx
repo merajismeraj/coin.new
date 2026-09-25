@@ -1,4 +1,4 @@
-import { riskFlagsOf, type InvoiceWithSettlements } from "@coinnew/shared-types";
+import { riskFlagsOf, TOKENS, type InvoiceWithSettlements } from "@coinnew/shared-types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ApiRequestError, authedApi } from "@/lib/api";
@@ -40,7 +40,7 @@ export default async function InvoicePage({ params, searchParams }: { params: { 
           <p className="mt-1 text-3xl font-semibold tabular-nums">{usd(inv.amount_usd)}</p>
           {(() => {
             // Stablecoins at par: compare what was received with what was invoiced.
-            const got = inv.settlements.filter((x) => x.confirmed_at && ["USDC", "USDT"].includes(x.token)).reduce((a, x) => a + Number(x.amount), 0);
+            const got = inv.settlements.filter((x) => x.confirmed_at && (TOKENS as readonly string[]).includes(x.token)).reduce((a, x) => a + Number(x.amount), 0);
             const diff = got - Number(inv.amount_usd);
             if (!got || Math.abs(diff) < 0.01) return null;
             return (

@@ -21,6 +21,17 @@ describe("onboarding", () => {
     expect(both.merchant.receiving_wallets).toEqual({ evm: EVM_WALLET, solana: SOL_WALLET });
   });
 
+  it("keeps Robinhood Chain opt-in: never enabled by default, only when asked for", async () => {
+    const { merchant, api_key } = await onboard(ctx.app, { receiving_wallets: { solana: SOL_WALLET } });
+    expect(merchant.preferred_chains).not.toContain("robinhood");
+    // Adding an EVM wallet enables the default EVM chains, not Robinhood Chain.
+    const added = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: api_key.key, body: { receiving_wallets: { evm: EVM_WALLET } } });
+    expect(added.json().preferred_chains).toEqual(["ethereum", "base", "polygon", "solana"]);
+    const optIn = await call(ctx.app, "PATCH", "/v1/merchants/me", { key: api_key.key, body: { preferred_chains: ["base", "robinhood"] } });
+    expect(optIn.json().preferred_chains).toEqual(["base", "robinhood"]);
+    expect((await onboard(ctx.app, { preferred_chains: ["robinhood"] })).merchant.preferred_chains).toEqual(["robinhood"]);
+  });
+
   it("rejects chains without a wallet of their family", async () => {
     const res = await call(ctx.app, "POST", "/v1/merchants", {
       body: { business_name: "X", email: "x@x.test", country_code: "US", receiving_wallets: { evm: EVM_WALLET }, preferred_chains: ["base", "solana"] },
@@ -156,6 +167,7 @@ describe("config", () => {
       ethereum: "https://eth-mainnet.g.alchemy.com/v2/k1",
       base: "https://base-mainnet.g.alchemy.com/v2/k1",
       polygon: "https://polygon-mainnet.g.alchemy.com/v2/k1",
+      robinhood: "https://robinhood-mainnet.g.alchemy.com/v2/k1",
       solana: "https://sol.example",
     });
     expect(loadConfig({ ALCHEMY_API_KEY: "k1" }).rpcUrls.base).toBe("https://base-sepolia.g.alchemy.com/v2/k1");

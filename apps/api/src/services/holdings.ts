@@ -49,7 +49,7 @@ export class HoldingsService {
     });
     const data = await Promise.all(
       rows.map(async ({ t, wallet }): Promise<WalletHolding> => {
-        const base = { chain: t.chain, token: t.token, wallet, token_address: t.address, accepting: m.preferredChains.includes(t.chain) };
+        const base = { chain: t.chain, token: t.token, wallet, token_address: t.address, bridged: !!t.bridged, accepting: m.preferredChains.includes(t.chain) };
         try {
           const units = await withTimeout(this.verifier.balance(t.chain, { tokenAddress: t.address, owner: wallet }), READ_TIMEOUT_MS);
           return { ...base, balance: formatUnits(units, t.decimals), error: null };

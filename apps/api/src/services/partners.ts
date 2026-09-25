@@ -157,7 +157,8 @@ export async function enableFiatPayout(d: PartnerDeps, m: MerchantRow): Promise<
   const bridge = requireBridge(d);
   const existing = await d.db.select().from(liquidationAddresses).where(and(eq(liquidationAddresses.merchantId, m.id), eq(liquidationAddresses.externalAccountId, a!.externalAccountId!)));
   const have = new Set(existing.map((l) => `${l.chain}:${l.token}`));
-  const pairs = supportedPairs(d.config.network, m.preferredChains as Chain[], ["USDC", "USDT"]).filter((p) => !have.has(`${p.chain}:${p.token}`));
+  const rails = (m.preferredChains as Chain[]).filter((c) => (BRIDGE_CRYPTO_RAILS as readonly Chain[]).includes(c));
+  const pairs = supportedPairs(d.config.network, rails, ["USDC", "USDT"]).filter((p) => !have.has(`${p.chain}:${p.token}`));
   for (const p of pairs) {
     try {
       const l = await bridge.createLiquidationAddress(a!.customerId!, {

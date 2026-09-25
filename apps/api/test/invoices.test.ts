@@ -26,7 +26,7 @@ describe("POST /v1/invoices", () => {
   it("numbers invoices sequentially and defaults chains/tokens from the merchant", async () => {
     await create({ amount_usd: "1" });
     const second = (await create({ amount_usd: "2.5" })).json();
-    expect(second).toMatchObject({ invoice_number: "INV-00002", amount_usd: "2.50", accepted_tokens: ["USDC", "USDT"], accepted_chains: ["ethereum", "base", "polygon"] });
+    expect(second).toMatchObject({ invoice_number: "INV-00002", amount_usd: "2.50", accepted_tokens: ["USDC", "USDT", "USDG"], accepted_chains: ["ethereum", "base", "polygon"] });
   });
 
   it("validates amounts, chains and custom invoice numbers", async () => {
@@ -95,7 +95,7 @@ describe("GET /v1/checkout/:invoice_id (public)", () => {
       invoice_number: "INV-00001",
       merchant_name: "Acme Ltd",
       amount_usd: "99.00",
-      accepted_tokens: ["USDC", "USDT"],
+      accepted_tokens: ["USDC", "USDT", "USDG"],
       accepted_chains: ["ethereum", "base", "polygon"],
       status: "pending",
       expires_at: null,
@@ -107,6 +107,23 @@ describe("GET /v1/checkout/:invoice_id (public)", () => {
     expect(res.json().payment_options.map((o: { chain: string; token: string }) => `${o.chain}:${o.token}`)).toEqual([
       "ethereum:USDC", "ethereum:USDT", "base:USDC", "polygon:USDC", "polygon:USDT",
     ]);
+    expect(res.json().payment_options.every((o: { bridged: boolean }) => !o.bridged)).toBe(true);
+  });
+
+  it("offers USDG and labelled bridged USDC on Robinhood Chain once the merchant opts in", async () => {
+    await call(ctx.app, "PATCH", "/v1/merchants/me", { key, body: { preferred_chains: ["base", "robinhood"] } });
+    const inv = (await create({ amount_usd: 10 })).json();
+    const opts = (await call(ctx.app, "GET", `/v1/checkout/${inv.id}`)).json().payment_options;
+    expect(opts.map((o: { chain: string; token: string; bridged: boolean }) => `${o.chain}:${o.token}${o.bridged ? " (bridged)" : ""}`)).toEqual([
+      "base:USDC", "robinhood:USDG", "robinhood:USDC (bridged)",
+    ]);
+    expect(opts.find((o: { chain: string; token: string }) => o.chain === "robinhood" && o.token === "USDG")).toMatchObject({
+      chain_id: 4663,
+      token_address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      card: false,
+    });
+    // USDG exists only on Robinhood Chain.
+    expect((await create({ amount_usd: 5, accepted_chains: ["base"], accepted_tokens: ["USDG"] })).json().error.code).toBe("no_payment_option");
   });
 
   it("404s for unknown or malformed ids", async () => {

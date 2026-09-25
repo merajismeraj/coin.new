@@ -105,7 +105,7 @@ export function BankTransferPanel({ invoice }: { invoice: CheckoutInvoice }) {
 }
 
 export function CardPanel({ invoice }: { invoice: CheckoutInvoice }) {
-  const options = invoice.payment_options;
+  const options = invoice.payment_options.filter((o) => o.card);
   const [idx, setIdx] = useState(Math.max(0, options.findIndex((o) => o.chain === "base" && o.token === "USDC")));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

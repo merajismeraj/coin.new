@@ -2,15 +2,24 @@ import { z } from "zod";
 
 // ---- Enums -----------------------------------------------------------------
 
-export const CHAINS = ["ethereum", "base", "polygon", "solana"] as const;
+export const CHAINS = ["ethereum", "base", "polygon", "robinhood", "solana"] as const;
 export const Chain = z.enum(CHAINS);
 export type Chain = z.infer<typeof Chain>;
 
-export const EVM_CHAINS: readonly Chain[] = ["ethereum", "base", "polygon"];
+export const EVM_CHAINS: readonly Chain[] = ["ethereum", "base", "polygon", "robinhood"];
+
+/**
+ * Chains a merchant must switch on explicitly; never enabled by default.
+ * Robinhood Chain: its USDC is bridged, not Circle-issued, and liquidity is thin.
+ */
+export const OPT_IN_CHAINS: readonly Chain[] = ["robinhood"];
+
+export const CHAIN_LABELS: Record<Chain, string> = { ethereum: "Ethereum", base: "Base", polygon: "Polygon", robinhood: "Robinhood Chain", solana: "Solana" };
 export type ChainFamily = "evm" | "solana";
 export const chainFamily = (c: Chain): ChainFamily => (c === "solana" ? "solana" : "evm");
 
-export const TOKENS = ["USDC", "USDT"] as const;
+/** USD stablecoins. USDG (Global Dollar, Paxos) is only offered on Robinhood Chain, where it is the native stablecoin. */
+export const TOKENS = ["USDC", "USDT", "USDG"] as const;
 export const Token = z.enum(TOKENS);
 export type Token = z.infer<typeof Token>;
 
@@ -130,7 +139,8 @@ export interface CreateMerchantResponse {
 export const CreateInvoiceBody = z.object({
   invoice_number: z.string().trim().min(1).max(64).optional(),
   amount_usd: UsdAmount,
-  accepted_tokens: z.array(Token).min(1).transform(uniq).default(["USDC", "USDT"]),
+  // Each token is only offered where the registry lists it (e.g. USDG only on Robinhood Chain).
+  accepted_tokens: z.array(Token).min(1).transform(uniq).default([...TOKENS]),
   accepted_chains: z.array(Chain).min(1).transform(uniq).optional(),
   buyer_email: z.string().trim().toLowerCase().email().optional(),
   expires_in_hours: z.number().int().min(1).max(24 * 90).optional(),
@@ -202,6 +212,10 @@ export interface PaymentOption {
   token: Token;
   token_address: string;
   decimals: number;
+  /** A bridged representation, not the issuer's own contract (e.g. USDC on Robinhood Chain). */
+  bridged: boolean;
+  /** Card on-ramp (MoonPay) can deliver this chain+token. */
+  card: boolean;
 }
 
 /** Deliberately minimal: no merchant email, no buyer PII. */
@@ -374,6 +388,8 @@ export interface WalletHolding {
   token: Token;
   wallet: string;
   token_address: string;
+  /** A bridged representation rather than the issuer's own contract. */
+  bridged: boolean;
   /** Decimal token amount (e.g. "37.192124"); null when the chain read failed. */
   balance: string | null;
   /** Whether checkout currently accepts payments on this chain. */

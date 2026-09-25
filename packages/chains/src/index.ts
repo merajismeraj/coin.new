@@ -20,6 +20,11 @@ export interface TokenInfo {
   /** ERC-20 contract address or SPL mint. */
   address: string;
   decimals: number;
+  /**
+   * Set only for a deliberate exception to "official issuances only": a
+   * canonical-bridge token whose backing asset is `l1Address` on Ethereum.
+   */
+  bridged?: { via: string; l1Address: string };
 }
 
 // Confirmation depth is chain-specific: Polygon PoS has a history of deep
@@ -29,12 +34,16 @@ const CHAINS: Record<Network, Record<Chain, ChainInfo>> = {
     ethereum: { chain: "ethereum", family: "evm", name: "Ethereum", chainId: 1, confirmations: 3, defaultRpc: "https://ethereum-rpc.publicnode.com", explorerTx: (h) => `https://etherscan.io/tx/${h}` },
     base: { chain: "base", family: "evm", name: "Base", chainId: 8453, confirmations: 3, defaultRpc: "https://mainnet.base.org", explorerTx: (h) => `https://basescan.org/tx/${h}` },
     polygon: { chain: "polygon", family: "evm", name: "Polygon", chainId: 137, confirmations: 16, defaultRpc: "https://polygon-rpc.com", explorerTx: (h) => `https://polygonscan.com/tx/${h}` },
+    // Arbitrum Orbit L2 with ~0.1s blocks: 60 blocks is ~6s, the same sequencer
+    // trust window Base gets from 3 x 2s blocks.
+    robinhood: { chain: "robinhood", family: "evm", name: "Robinhood Chain", chainId: 4663, confirmations: 60, defaultRpc: "https://rpc.mainnet.chain.robinhood.com", explorerTx: (h) => `https://robinhoodchain.blockscout.com/tx/${h}` },
     solana: { chain: "solana", family: "solana", name: "Solana", chainId: null, confirmations: 1, defaultRpc: "https://api.mainnet-beta.solana.com", explorerTx: (h) => `https://solscan.io/tx/${h}` },
   },
   testnet: {
     ethereum: { chain: "ethereum", family: "evm", name: "Sepolia", chainId: 11155111, confirmations: 2, defaultRpc: "https://ethereum-sepolia-rpc.publicnode.com", explorerTx: (h) => `https://sepolia.etherscan.io/tx/${h}` },
     base: { chain: "base", family: "evm", name: "Base Sepolia", chainId: 84532, confirmations: 2, defaultRpc: "https://sepolia.base.org", explorerTx: (h) => `https://sepolia.basescan.org/tx/${h}` },
     polygon: { chain: "polygon", family: "evm", name: "Polygon Amoy", chainId: 80002, confirmations: 2, defaultRpc: "https://rpc-amoy.polygon.technology", explorerTx: (h) => `https://amoy.polygonscan.com/tx/${h}` },
+    robinhood: { chain: "robinhood", family: "evm", name: "Robinhood Chain Testnet", chainId: 46630, confirmations: 20, defaultRpc: "https://rpc.testnet.chain.robinhood.com", explorerTx: (h) => `https://explorer.testnet.chain.robinhood.com/tx/${h}` },
     solana: { chain: "solana", family: "solana", name: "Solana Devnet", chainId: null, confirmations: 1, defaultRpc: "https://api.devnet.solana.com", explorerTx: (h) => `https://solscan.io/tx/${h}?cluster=devnet` },
   },
 };
@@ -48,10 +57,25 @@ const TOKENS: Record<Network, TokenInfo[]> = {
     { chain: "base", token: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
     { chain: "polygon", token: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6 },
     { chain: "polygon", token: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6 },
+    // Robinhood Chain's native stablecoin, issued by Paxos.
+    { chain: "robinhood", token: "USDG", address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", decimals: 6 },
+    // Exception to "official issuances only", by product decision: Circle doesn't
+    // issue USDC here. This is the canonical Arbitrum-bridge token, the address
+    // the L2GatewayRouter (0x1E324B93…1B89) derives for Ethereum USDC; its
+    // l1Address() returns Ethereum USDC. It carries bridge risk and little
+    // liquidity, so checkout labels it as bridged.
+    {
+      chain: "robinhood",
+      token: "USDC",
+      address: "0x80e0e24718dbFcad49ECAA6F1e6C89A190586cA8",
+      decimals: 6,
+      bridged: { via: "Arbitrum canonical bridge", l1Address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+    },
     { chain: "solana", token: "USDC", address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
     { chain: "solana", token: "USDT", address: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 },
   ],
-  // Circle's testnet USDC. No official USDT on testnets.
+  // Circle's testnet USDC. No official USDT on testnets. Robinhood Chain
+  // Testnet has no verified stablecoin contracts yet, so it offers nothing.
   testnet: [
     { chain: "ethereum", token: "USDC", address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
     { chain: "base", token: "USDC", address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", decimals: 6 },

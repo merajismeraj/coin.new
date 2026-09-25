@@ -139,6 +139,11 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
           <div className="mt-2 space-y-1">
             <p>Send <strong>exactly</strong> <span className="font-mono">{i.amount} {i.token}</span> on <strong>{i.chain_name}</strong> to:</p>
             <p className="break-all rounded bg-zinc-100 p-2 font-mono dark:bg-zinc-800">{i.to_address}</p>
+            {i.bridged && (
+              <p>
+                Only this {i.token} contract counts: <span className="break-all font-mono">{i.token_address}</span>
+              </p>
+            )}
             <p>If your exchange deducts a fee from the amount, the payment won’t be matched automatically.</p>
           </div>
         </details>
@@ -177,10 +182,17 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
                 className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium aria-pressed:border-brand aria-pressed:bg-blue-50 dark:border-zinc-700 dark:aria-pressed:bg-blue-950"
               >
                 {o.token}
+                {o.bridged && <span className="font-normal text-zinc-500"> (bridged)</span>}
               </button>
             ))}
           </div>
         </div>
+      )}
+      {option.bridged && (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          This {option.token} on {option.chain_name} is bridged from Ethereum, not issued by Circle. Make sure your wallet holds this exact token, or
+          choose another option.
+        </p>
       )}
 
       {payer ? (

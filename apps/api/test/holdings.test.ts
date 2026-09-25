@@ -26,8 +26,13 @@ describe("GET /v1/merchants/me/holdings", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body).toMatchObject({ network: "mainnet", total_usd: "335.07", complete: true });
-    // 7 mainnet stablecoins: USDC+USDT on ethereum/polygon/solana, USDC on base (no USDT on Base).
-    expect(body.data).toHaveLength(7);
+    // 9 mainnet stablecoins: USDC+USDT on ethereum/polygon/solana, USDC on base (no USDT on Base),
+    // USDG + bridged USDC on Robinhood Chain (shown even though it's opt-in and not enabled here).
+    expect(body.data).toHaveLength(9);
+    expect(body.data.filter((r: { chain: string }) => r.chain === "robinhood").map((r: { token: string; bridged: boolean; accepting: boolean }) => [r.token, r.bridged, r.accepting])).toEqual([
+      ["USDG", false, false],
+      ["USDC", true, false],
+    ]);
     expect(body.data.find((r: { chain: string; token: string }) => r.chain === "ethereum" && r.token === "USDT")).toMatchObject({
       balance: "291.368219",
       wallet: EVM_WALLET,
@@ -73,15 +78,16 @@ describe("HoldingsService", () => {
     const svc = new HoldingsService(chain, "mainnet", () => t);
 
     await svc.get(owner);
-    expect(reads).toBe(5);
+    // 7 EVM stablecoins across Ethereum, Base, Polygon and Robinhood Chain.
+    expect(reads).toBe(7);
     t = 29_000;
     await svc.get(owner);
-    expect(reads).toBe(5);
+    expect(reads).toBe(7);
     await svc.get({ ...owner, evmWallet: "0x2222222222222222222222222222222222222222" });
-    expect(reads).toBe(10);
+    expect(reads).toBe(14);
     t = 31_000;
     await svc.get(owner);
-    expect(reads).toBe(15);
+    expect(reads).toBe(21);
   });
 
   it("truncates the total to whole cents rather than rounding up", async () => {

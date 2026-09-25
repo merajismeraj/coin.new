@@ -1,9 +1,9 @@
 import { createConfig, http } from "wagmi";
-import { base, baseSepolia, mainnet, polygon, polygonAmoy, sepolia } from "wagmi/chains";
+import { base, baseSepolia, mainnet, polygon, polygonAmoy, robinhood, robinhoodTestnet, sepolia } from "wagmi/chains";
 import { injected, walletConnect } from "wagmi/connectors";
 
 // Both networks are registered; the invoice's payment options carry the chain id to use.
-const chains = [mainnet, base, polygon, sepolia, baseSepolia, polygonAmoy] as const;
+const chains = [mainnet, base, polygon, robinhood, sepolia, baseSepolia, polygonAmoy, robinhoodTestnet] as const;
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
 
 export const wagmiConfig = createConfig({

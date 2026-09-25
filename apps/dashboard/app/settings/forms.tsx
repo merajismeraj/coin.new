@@ -1,14 +1,12 @@
 "use client";
 
-import { CHAINS, chainFamily, type Merchant } from "@coinnew/shared-types";
+import { CHAIN_LABELS, CHAINS, chainFamily, OPT_IN_CHAINS, type Merchant } from "@coinnew/shared-types";
 import { useFormState } from "react-dom";
 import { CopyButton } from "@/components/copy-button";
 import { SubmitButton } from "@/components/submit-button";
 import { ErrorBanner, Field, Input } from "@/components/ui";
 import { useState } from "react";
 import { addBankAccount, issueApiKey, updateMerchant, type IssueKeyState } from "../actions";
-
-const LABEL = { ethereum: "Ethereum", base: "Base", polygon: "Polygon", solana: "Solana" } as const;
 
 export function ProfileForm({ merchant, idem }: { merchant: Merchant; idem: string }) {
   const [state, action] = useFormState(updateMerchant, {});
@@ -21,7 +19,7 @@ export function ProfileForm({ merchant, idem }: { merchant: Merchant; idem: stri
       <ErrorBanner message={state.error} />
       {state.saved && <p className="text-sm text-emerald-700 dark:text-emerald-400">Saved.</p>}
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="EVM wallet" hint="Ethereum, Base and Polygon" error={f.receiving_wallets}>
+        <Field label="EVM wallet" hint="Ethereum, Base, Polygon and Robinhood Chain" error={f.receiving_wallets}>
           <Input name="evm_wallet" defaultValue={w.evm ?? ""} className="font-mono" placeholder="0x…" autoComplete="off" />
         </Field>
         <Field label="Solana wallet">
@@ -36,10 +34,16 @@ export function ProfileForm({ merchant, idem }: { merchant: Merchant; idem: stri
           {available.map((c) => (
             <label key={c} className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">
               <input type="checkbox" name="preferred_chains" value={c} defaultChecked={merchant.preferred_chains.includes(c)} className="accent-brand" />
-              {LABEL[c]}
+              {CHAIN_LABELS[c]}
             </label>
           ))}
         </div>
+        {available.some((c) => OPT_IN_CHAINS.includes(c)) && (
+          <p className="mt-2 text-xs text-zinc-500">
+            Robinhood Chain is off unless you turn it on. Buyers pay in USDG (Paxos), or in USDC that is bridged from Ethereum rather than
+            issued by Circle, so it carries bridge risk and has little liquidity there. Fiat payout via Bridge doesn’t cover it.
+          </p>
+        )}
       </Field>
       <Field label="Webhook URL" hint="HTTPS endpoint for invoice.paid, invoice.canceled and settlement.confirmed" error={f.webhook_url}>
         <Input name="webhook_url" type="url" defaultValue={merchant.webhook_url ?? ""} placeholder="https://example.com/webhooks/coinnew" />

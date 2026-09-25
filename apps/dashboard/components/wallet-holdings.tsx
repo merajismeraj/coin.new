@@ -1,7 +1,5 @@
-import type { Chain, WalletHoldings } from "@coinnew/shared-types";
+import { CHAIN_LABELS, type WalletHoldings } from "@coinnew/shared-types";
 import { Card, date, usd } from "@/components/ui";
-
-const CHAIN_NAMES: Record<Chain, string> = { ethereum: "Ethereum", base: "Base", polygon: "Polygon", solana: "Solana" };
 
 const amount = (v: string) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -32,13 +30,14 @@ export function WalletBalanceCard({ holdings }: { holdings: WalletHoldings | nul
       }
     >
       {held.length === 0 ? (
-        <p className="text-sm text-zinc-500">No USDC or USDT in your receiving wallets yet.</p>
+        <p className="text-sm text-zinc-500">No stablecoins in your receiving wallets yet.</p>
       ) : (
         <ul className="divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
           {held.map((r) => (
             <li key={`${r.chain}:${r.token}`} className="flex items-center justify-between gap-3 py-2.5">
               <div className="min-w-0">
-                <span className="font-medium">{r.token}</span> <span className="text-zinc-500">on {CHAIN_NAMES[r.chain]}</span>
+                <span className="font-medium">{r.token}</span>
+                {r.bridged && <span className="text-zinc-500"> (bridged)</span>} <span className="text-zinc-500">on {CHAIN_LABELS[r.chain]}</span>
                 {!r.accepting && (
                   <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">not accepting</span>
                 )}
@@ -53,8 +52,8 @@ export function WalletBalanceCard({ holdings }: { holdings: WalletHoldings | nul
         </ul>
       )}
       <p className="mt-4 text-xs text-zinc-500">
-        Read live from chain for <span className="font-mono">{wallets.map(short).join(", ")}</span> · as of {date(holdings.as_of)}. Only official
-        USDC/USDT contracts are counted; look-alike tokens airdropped to your wallet are ignored. These funds are in your wallet: coin.new never
+        Read live from chain for <span className="font-mono">{wallets.map(short).join(", ")}</span> · as of {date(holdings.as_of)}. Only the
+        stablecoin contracts coin.new accepts are counted; look-alike tokens airdropped to your wallet are ignored. These funds are in your wallet: coin.new never
         holds them.
         {!holdings.complete && " Some chains couldn’t be read, so the total may be higher."}
       </p>

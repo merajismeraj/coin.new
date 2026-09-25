@@ -11,6 +11,15 @@ describe("registry", () => {
   });
 });
 
+describe("Robinhood Chain", () => {
+  it("offers native USDG and bridged USDC on mainnet only, and nothing else is marked bridged", () => {
+    expect(supportedPairs("mainnet", ["robinhood"], ["USDC", "USDT", "USDG"]).map((t) => `${t.token}${t.bridged ? " (bridged)" : ""}`)).toEqual(["USDG", "USDC (bridged)"]);
+    expect(tokenInfo("mainnet", "robinhood", "USDC")!.bridged!.l1Address).toBe(tokenInfo("mainnet", "ethereum", "USDC")!.address);
+    expect(supportedPairs("testnet", ["robinhood"], ["USDC", "USDT", "USDG"])).toEqual([]);
+    expect(supportedPairs("mainnet", ["ethereum", "base", "polygon", "solana"], ["USDC", "USDT", "USDG"]).some((t) => t.bridged || t.token === "USDG")).toBe(false);
+  });
+});
+
 describe("amounts", () => {
   it("converts USD to base units exactly", () => {
     expect(usdToUnits("1200.00", 6)).toBe(1_200_000_000n);

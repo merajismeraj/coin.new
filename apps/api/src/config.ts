@@ -36,8 +36,8 @@ export interface Config {
 
 // Alchemy's per-network hosts; one app key works on every network enabled for the app.
 const ALCHEMY_HOSTS: Record<Network, Record<Chain, string>> = {
-  mainnet: { ethereum: "eth-mainnet", base: "base-mainnet", polygon: "polygon-mainnet", solana: "solana-mainnet" },
-  testnet: { ethereum: "eth-sepolia", base: "base-sepolia", polygon: "polygon-amoy", solana: "solana-devnet" },
+  mainnet: { ethereum: "eth-mainnet", base: "base-mainnet", polygon: "polygon-mainnet", robinhood: "robinhood-mainnet", solana: "solana-mainnet" },
+  testnet: { ethereum: "eth-sepolia", base: "base-sepolia", polygon: "polygon-amoy", robinhood: "robinhood-testnet", solana: "solana-devnet" },
 };
 export const alchemyRpcUrl = (network: Network, chain: Chain, key: string) => `https://${ALCHEMY_HOSTS[network][chain]}.g.alchemy.com/v2/${encodeURIComponent(key)}`;
 
