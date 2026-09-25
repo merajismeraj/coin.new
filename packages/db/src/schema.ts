@@ -42,6 +42,7 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull().default("pending"),
   checkoutUrl: text("checkout_url").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: createdAt(),
 });
@@ -118,6 +119,7 @@ export const inboundEvents = pgTable("inbound_events", {
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),
   processedAt: timestamp("processed_at", { withTimezone: true }),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -174,5 +176,42 @@ export const partnerEvents = pgTable("partner_events", {
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),
   processedAt: timestamp("processed_at", { withTimezone: true }),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const unmatchedTransfers = pgTable("unmatched_transfers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id").notNull().references(() => merchants.id),
+  chain: text("chain").notNull(),
+  txHash: text("tx_hash").notNull(),
+  logIndex: integer("log_index"),
+  token: text("token").notNull(),
+  tokenAddress: text("token_address").notNull(),
+  decimals: integer("decimals").notNull(),
+  amountUnits: numeric("amount_units", { precision: 78, scale: 0 }).notNull(),
+  fromAddress: text("from_address"),
+  toAddress: text("to_address").notNull(),
+  status: text("status").notNull().default("open"),
+  settlementId: uuid("settlement_id").references(() => settlements.id),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
+export const emailOutbox = pgTable("email_outbox", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id").references(() => merchants.id),
+  invoiceId: uuid("invoice_id").references(() => invoices.id),
+  template: text("template").notNull(),
+  toAddress: text("to_address").notNull(),
+  subject: text("subject").notNull(),
+  html: text("html").notNull(),
+  text: text("text").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  providerId: text("provider_id"),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: createdAt(),
 });

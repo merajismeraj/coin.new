@@ -1,11 +1,11 @@
-import type { InvoiceWithSettlements } from "@coinnew/shared-types";
+import { riskFlagsOf, type InvoiceWithSettlements } from "@coinnew/shared-types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ApiRequestError, authedApi } from "@/lib/api";
 import { CopyButton } from "@/components/copy-button";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, StatusBadge, date, usd } from "@/components/ui";
-import { cancelInvoice } from "../../actions";
+import { cancelInvoice, resendInvoice } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export default async function InvoicePage({ params }: { params: { id: string } }) {
+export default async function InvoicePage({ params, searchParams }: { params: { id: string }; searchParams: { notice?: string } }) {
   let inv: InvoiceWithSettlements;
   try {
     inv = await authedApi<InvoiceWithSettlements>(`/v1/invoices/${params.id}`);
@@ -38,13 +38,33 @@ export default async function InvoicePage({ params }: { params: { id: string } }
             <StatusBadge status={inv.status} />
           </div>
           <p className="mt-1 text-3xl font-semibold tabular-nums">{usd(inv.amount_usd)}</p>
+          {(() => {
+            // Stablecoins at par: compare what was received with what was invoiced.
+            const got = inv.settlements.filter((x) => x.confirmed_at && ["USDC", "USDT"].includes(x.token)).reduce((a, x) => a + Number(x.amount), 0);
+            const diff = got - Number(inv.amount_usd);
+            if (!got || Math.abs(diff) < 0.01) return null;
+            return (
+              <p className={`mt-1 text-sm ${diff < 0 ? "text-amber-700 dark:text-amber-400" : "text-zinc-500"}`}>
+                Received {usd(got.toFixed(2))} · {diff < 0 ? `${usd((-diff).toFixed(2))} short` : `${usd(diff.toFixed(2))} over`}
+              </p>
+            );
+          })()}
         </div>
         {inv.status === "pending" && (
-          <form action={cancel}>
-            <SubmitButton variant="danger" pendingText="Canceling…">Cancel invoice</SubmitButton>
-          </form>
+          <div className="flex gap-2">
+            {inv.buyer_email && (
+              <form action={resendInvoice.bind(null, inv.id)}>
+                <SubmitButton variant="secondary" pendingText="Sending…">Resend to buyer</SubmitButton>
+              </form>
+            )}
+            <form action={cancel}>
+              <SubmitButton variant="danger" pendingText="Canceling…">Cancel invoice</SubmitButton>
+            </form>
+          </div>
         )}
       </div>
+
+      {searchParams.notice && <p className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900">{searchParams.notice}</p>}
 
       <Card title="Checkout link">
         <div className="flex items-center gap-2">
@@ -84,9 +104,12 @@ export default async function InvoicePage({ params }: { params: { id: string } }
                   </div>
                   {s.from_address && <div className="mt-1 truncate font-mono text-xs text-zinc-500">from {s.from_address}</div>}
                   {s.tx_hash && <div className="mt-1 truncate font-mono text-xs text-zinc-500">tx {s.tx_hash}</div>}
-                  {s.risk_flags.length > 0 && (
+                  {s.risk_flags.includes("manual_match") && (
+                    <p className="mt-2 text-xs text-zinc-500">Matched manually from an unmatched transfer.</p>
+                  )}
+                  {riskFlagsOf(s.risk_flags).length > 0 && (
                     <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950 dark:text-red-300">
-                      Flagged: {s.risk_flags.join(", ").replace(/_/g, " ")}. Review before fulfilling; consult counsel on handling these funds.
+                      Flagged: {riskFlagsOf(s.risk_flags).join(", ").replace(/_/g, " ")}. Review before fulfilling; consult counsel on handling these funds.
                     </p>
                   )}
                 </li>

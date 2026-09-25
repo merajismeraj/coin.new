@@ -1,9 +1,12 @@
 import { randomInt } from "node:crypto";
-import { chainInfo, formatUnits, maxSuffix, sameAddress, tokenInfo, usdToUnits, type Network } from "@coinnew/chains";
+import { chainInfo, formatUnits, maxSuffix, sameAddress, tokenByAddress, tokenInfo, usdToUnits, type Network } from "@coinnew/chains";
 import type { ChainVerifier, ObservedTransfer } from "@coinnew/chains/verify";
-import { inboundEvents, invoices, paymentIntents, settlements, type Db } from "@coinnew/db";
-import { chainFamily, type Chain, type Token } from "@coinnew/shared-types";
-import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { inboundEvents, invoices, liquidationAddresses, merchants, paymentIntents, settlements, unmatchedTransfers, type Db } from "@coinnew/db";
+import { claimDue } from "../lib/claim.js";
+import { enqueueEmail } from "./email.js";
+import { paymentReceipt, paymentReceivedMerchant } from "./email-templates.js";
+import { chainFamily, riskFlagsOf, type Chain, type Token } from "@coinnew/shared-types";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { isUniqueViolation } from "../lib/errors.js";
 import { toInvoice, toSettlement } from "../lib/serialize.js";
 import type { WalletScreener } from "./screening.js";
@@ -19,6 +22,8 @@ export interface PaymentDeps {
   verifier: ChainVerifier;
   screener: WalletScreener;
   network: Network;
+  /** Base URL for dashboard links in merchant emails. */
+  dashboardUrl?: string;
   log?: { warn: (o: object, msg: string) => void };
 }
 
@@ -100,7 +105,7 @@ async function settleTransfer(deps: PaymentDeps, t: ObservedTransfer, final: boo
   if (existing) {
     if (existing.confirmedAt || !final) return "unchanged";
     const [s] = await db.update(settlements).set({ confirmedAt: new Date() }).where(and(eq(settlements.id, existing.id), isNull(settlements.confirmedAt))).returning();
-    if (s) await onConfirmed(db, s);
+    if (s) await onConfirmed(db, s, deps);
     return s ? "confirmed" : "unchanged";
   }
 
@@ -119,7 +124,10 @@ async function settleTransfer(deps: PaymentDeps, t: ObservedTransfer, final: boo
         eq(paymentIntents.amountUnits, t.amountUnits.toString()),
       ),
     );
-  if (!intent) return "no_match";
+  if (!intent) {
+    await recordUnmatched(deps, t);
+    return "no_match";
+  }
 
   const screening = t.from ? await deps.screener.screen(t.chain, t.from) : { blocked: false, flags: [] };
   if (screening.blocked) deps.log?.warn({ chain: t.chain, tx: t.txHash, from: t.from }, "payment received from a screened wallet");
@@ -151,12 +159,12 @@ async function settleTransfer(deps: PaymentDeps, t: ObservedTransfer, final: boo
     return s;
   });
   if (!created) return "unchanged";
-  if (final) await onConfirmed(db, created);
+  if (final) await onConfirmed(db, created, deps);
   return "created";
 }
 
-/** Marks the invoice paid (unless canceled) and notifies the merchant. */
-export async function onConfirmed(db: Db, s: typeof settlements.$inferSelect) {
+/** Marks the invoice paid (unless canceled) and notifies the merchant (webhooks + email) and the buyer (receipt). */
+export async function onConfirmed(db: Db, s: typeof settlements.$inferSelect, ctx: { network: Network; dashboardUrl?: string }) {
   const [paid] = await db
     .update(invoices)
     .set({ status: "paid" })
@@ -165,14 +173,86 @@ export async function onConfirmed(db: Db, s: typeof settlements.$inferSelect) {
   const [inv] = paid ? [paid] : await db.select().from(invoices).where(eq(invoices.id, s.invoiceId));
   const settlement = toSettlement(s);
   await enqueueWebhook(db, { merchantId: inv!.merchantId, invoiceId: inv!.id, type: "settlement.confirmed", data: { invoice_id: inv!.id, settlement } });
-  if (paid) await enqueueWebhook(db, { merchantId: paid.merchantId, invoiceId: paid.id, type: "invoice.paid", data: { ...toInvoice(paid), settlements: [settlement] } });
+  // Resolve any unmatched-transfer row for the same transaction (e.g. seen before a partner settled it).
+  if (s.chain && s.txHash) {
+    await db
+      .update(unmatchedTransfers)
+      .set({ status: "assigned", settlementId: s.id, resolvedAt: new Date() })
+      .where(and(eq(unmatchedTransfers.chain, s.chain), eq(unmatchedTransfers.txHash, s.txHash), eq(unmatchedTransfers.status, "open")));
+  }
+  if (!paid) return;
+  await enqueueWebhook(db, { merchantId: paid.merchantId, invoiceId: paid.id, type: "invoice.paid", data: { ...toInvoice(paid), settlements: [settlement] } });
+
+  const [m] = await db.select({ name: merchants.businessName, email: merchants.email }).from(merchants).where(eq(merchants.id, paid.merchantId));
+  const c = {
+    merchantName: m!.name,
+    invoiceNumber: paid.invoiceNumber,
+    amountUsd: paid.amountUsd,
+    checkoutUrl: paid.checkoutUrl,
+    expiresAt: paid.expiresAt,
+    paidAmount: settlement.amount,
+    token: settlement.token,
+    via: settlement.rail === "onchain" ? `${settlement.chain} transfer` : settlement.method === "bank_transfer" ? "bank transfer" : "card",
+    txUrl: s.chain && s.txHash && /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/.test(s.txHash) ? chainInfo(ctx.network, s.chain as Chain).explorerTx(s.txHash) : null,
+  };
+  if (paid.buyerEmail) await enqueueEmail(db, { template: "payment_receipt", merchantId: paid.merchantId, invoiceId: paid.id, to: paid.buyerEmail, ...paymentReceipt(c) });
+  await enqueueEmail(db, {
+    template: "payment_received_merchant",
+    merchantId: paid.merchantId,
+    invoiceId: paid.id,
+    to: m!.email,
+    ...paymentReceivedMerchant({ ...c, riskFlags: riskFlagsOf(s.riskFlags), dashboardUrl: `${ctx.dashboardUrl ?? ""}/invoices/${paid.id}` }),
+  });
+}
+
+/**
+ * A transfer reached an address we watch for a merchant but matched no intent
+ * (wrong amount, fee deducted by an exchange, paid without checkout). Keep it
+ * for manual reconciliation instead of silently dropping it.
+ */
+async function recordUnmatched(deps: PaymentDeps, t: ObservedTransfer) {
+  const token = tokenByAddress(deps.network, t.chain, t.tokenAddress);
+  if (!token) return; // not a supported stablecoin
+  const family = chainFamily(t.chain);
+  const addr = family === "evm" ? t.to.toLowerCase() : t.to;
+  const [owner] = await deps.db
+    .select({ id: merchants.id })
+    .from(merchants)
+    .where(family === "evm" ? sql`lower(${merchants.evmWallet}) = ${addr}` : eq(merchants.solanaWallet, addr))
+    .limit(1);
+  const [liq] = owner
+    ? []
+    : await deps.db
+        .select({ id: liquidationAddresses.merchantId })
+        .from(liquidationAddresses)
+        .where(and(eq(liquidationAddresses.chain, t.chain), family === "evm" ? sql`lower(${liquidationAddresses.address}) = ${addr}` : eq(liquidationAddresses.address, addr)))
+        .limit(1);
+  const merchantId = owner?.id ?? liq?.id;
+  if (!merchantId) return;
+  const [settled] = await deps.db.select({ id: settlements.id }).from(settlements).where(and(eq(settlements.chain, t.chain), eq(settlements.txHash, t.txHash))).limit(1);
+  if (settled) return;
+  await deps.db
+    .insert(unmatchedTransfers)
+    .values({
+      merchantId,
+      chain: t.chain,
+      txHash: t.txHash,
+      logIndex: t.logIndex,
+      token: token.token,
+      tokenAddress: token.address,
+      decimals: token.decimals,
+      amountUnits: t.amountUnits.toString(),
+      fromAddress: t.from,
+      toAddress: t.to,
+    })
+    .onConflictDoNothing();
 }
 
 // ---- Background jobs ---------------------------------------------------------
 
-/** Processes stored indexer notifications. RPC lag gets up to 10 attempts. */
+/** Processes stored indexer notifications. RPC lag gets up to 10 attempts with backoff. Safe to run in several workers. */
 export async function processInboundEvents(deps: PaymentDeps, limit = 50): Promise<number> {
-  const rows = await deps.db.select().from(inboundEvents).where(isNull(inboundEvents.processedAt)).orderBy(asc(inboundEvents.receivedAt)).limit(limit);
+  const rows = await claimDue(deps.db, inboundEvents, limit);
   for (const e of rows) {
     let error: string | null = null;
     try {
@@ -184,7 +264,7 @@ export async function processInboundEvents(deps: PaymentDeps, limit = 50): Promi
     const attempts = e.attempts + 1;
     await deps.db
       .update(inboundEvents)
-      .set({ attempts, lastError: error, processedAt: !error || attempts >= 10 ? new Date() : null })
+      .set({ attempts, lastError: error, processedAt: !error || attempts >= 10 ? new Date() : null, nextAttemptAt: new Date(Date.now() + Math.min(2_000 * 2 ** attempts, 5 * 60_000)) })
       .where(eq(inboundEvents.id, e.id));
   }
   return rows.length;

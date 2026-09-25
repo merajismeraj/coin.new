@@ -9,6 +9,8 @@ import { HttpError, isUniqueViolation, parse } from "../lib/errors.js";
 import { effectiveStatus, toInvoice, toSettlement } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
 import { enqueueWebhook } from "../services/webhooks.js";
+import { enqueueEmail, recentEmails } from "../services/email.js";
+import { invoiceIssued } from "../services/email-templates.js";
 import { supportedPairs } from "@coinnew/chains";
 
 const IdParams = z.object({ id: z.string().uuid() });
@@ -74,6 +76,7 @@ export async function invoiceRoutes(app: FastifyInstance, { db, config }: { db: 
       }
       try {
         const [row] = await db.insert(invoices).values({ ...values, invoiceNumber }).returning();
+        if (row!.buyerEmail && body.notify_buyer) await sendInvoiceEmail(db, row!);
         return reply.code(201).send(toInvoice(row!));
       } catch (err) {
         if (!isUniqueViolation(err)) throw err;
@@ -125,5 +128,33 @@ export async function invoiceRoutes(app: FastifyInstance, { db, config }: { db: 
     const invoice = toInvoice(updated);
     await enqueueWebhook(db, { merchantId: updated.merchantId, invoiceId: id, type: "invoice.canceled", data: invoice });
     return invoice;
+  });
+
+  // Re-send the checkout link to the buyer. Throttled so it can't be used to spam.
+  app.post("/v1/invoices/:id/resend", async (req) => {
+    const { id } = parse(IdParams, req.params);
+    const row = await loadOwned(req.merchantId!, id);
+    const status = effectiveStatus(row);
+    if (status !== "pending") throw new HttpError(409, "invalid_state", `Cannot resend an invoice that is ${status}`);
+    if (!row.buyerEmail) throw new HttpError(422, "no_buyer_email", "This invoice has no buyer_email");
+    if ((await recentEmails(db, id, "invoice_issued", 10 * 60_000)) > 0) {
+      throw new HttpError(429, "resend_throttled", "The invoice was sent in the last 10 minutes");
+    }
+    if ((await recentEmails(db, id, "invoice_issued", 24 * 3600_000)) >= 5) {
+      throw new HttpError(429, "resend_throttled", "At most 5 sends per invoice per day");
+    }
+    await sendInvoiceEmail(db, row);
+    return { sent_to: row.buyerEmail };
+  });
+}
+
+async function sendInvoiceEmail(db: Db, inv: typeof invoices.$inferSelect) {
+  const [m] = await db.select({ name: merchants.businessName }).from(merchants).where(eq(merchants.id, inv.merchantId));
+  await enqueueEmail(db, {
+    template: "invoice_issued",
+    merchantId: inv.merchantId,
+    invoiceId: inv.id,
+    to: inv.buyerEmail!,
+    ...invoiceIssued({ merchantName: m!.name, invoiceNumber: inv.invoiceNumber, amountUsd: inv.amountUsd, checkoutUrl: inv.checkoutUrl, expiresAt: inv.expiresAt }),
   });
 }

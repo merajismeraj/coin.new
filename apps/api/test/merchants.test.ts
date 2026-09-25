@@ -147,3 +147,18 @@ describe("PATCH /v1/merchants/me", () => {
     expect(fiat.json().error.code).toBe("partner_rail_required");
   });
 });
+
+describe("config", () => {
+  it("derives every chain's RPC from ALCHEMY_API_KEY, with explicit URLs taking precedence", async () => {
+    const { loadConfig } = await import("../src/config.js");
+    const c = loadConfig({ NETWORK: "mainnet", ALCHEMY_API_KEY: "k1", RPC_URL_SOLANA: "https://sol.example" });
+    expect(c.rpcUrls).toEqual({
+      ethereum: "https://eth-mainnet.g.alchemy.com/v2/k1",
+      base: "https://base-mainnet.g.alchemy.com/v2/k1",
+      polygon: "https://polygon-mainnet.g.alchemy.com/v2/k1",
+      solana: "https://sol.example",
+    });
+    expect(loadConfig({ ALCHEMY_API_KEY: "k1" }).rpcUrls.base).toBe("https://base-sepolia.g.alchemy.com/v2/k1");
+    expect(loadConfig({}).rpcUrls).toEqual({});
+  });
+});

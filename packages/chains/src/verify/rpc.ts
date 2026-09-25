@@ -32,7 +32,8 @@ export class RpcChainVerifier implements ChainVerifier {
 
   private evmClient(chain: Chain): PublicClient {
     let c = this.evm.get(chain);
-    if (!c) this.evm.set(chain, (c = createPublicClient({ transport: http(this.url(chain), { retryCount: 2 }) }) as PublicClient));
+    // cacheTime 0: finality depends on the current head; viem otherwise caches getBlockNumber (~4s).
+    if (!c) this.evm.set(chain, (c = createPublicClient({ transport: http(this.url(chain), { retryCount: 2 }), cacheTime: 0 }) as PublicClient));
     return c;
   }
 

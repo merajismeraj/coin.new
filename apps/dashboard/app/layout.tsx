@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {signedIn && (
               <nav className="flex items-center gap-5 text-sm">
                 <Link href="/" className="hover:text-brand">Invoices</Link>
+                <Link href="/payments" className="hover:text-brand">Payments</Link>
                 <Link href="/settings" className="hover:text-brand">Settings</Link>
                 <form action={logout}>
                   <button className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">Sign out</button>

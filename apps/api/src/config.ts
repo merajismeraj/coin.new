@@ -27,9 +27,17 @@ export interface Config {
   /** Licensed partner rails; null when not configured. */
   bridge: { apiKey: string; baseUrl: string; webhookPublicKey: string } | null;
   moonpay: { publishableKey: string; urlSigningSecret: string; webhookKey: string; sandbox: boolean } | null;
+  email: { resendApiKey: string | null; from: string; dashboardUrl: string };
   /** How long the checkout shows a payment intent as valid. */
   intentTtlMinutes: number;
 }
+
+// Alchemy's per-network hosts; one app key works on every network enabled for the app.
+const ALCHEMY_HOSTS: Record<Network, Record<Chain, string>> = {
+  mainnet: { ethereum: "eth-mainnet", base: "base-mainnet", polygon: "polygon-mainnet", solana: "solana-mainnet" },
+  testnet: { ethereum: "eth-sepolia", base: "base-sepolia", polygon: "polygon-amoy", solana: "solana-devnet" },
+};
+export const alchemyRpcUrl = (network: Network, chain: Chain, key: string) => `https://${ALCHEMY_HOSTS[network][chain]}.g.alchemy.com/v2/${encodeURIComponent(key)}`;
 
 const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -39,7 +47,13 @@ export function loadConfig(env = process.env): Config {
     checkoutBaseUrl: (env.CHECKOUT_BASE_URL ?? "http://localhost:3001").replace(/\/$/, ""),
     trustedProxies: list(env.TRUSTED_PROXIES),
     network,
-    rpcUrls: Object.fromEntries(CHAINS.flatMap((c) => (env[`RPC_URL_${c.toUpperCase()}`] ? [[c, env[`RPC_URL_${c.toUpperCase()}`]!]] : []))),
+    // Explicit RPC_URL_<CHAIN> wins; otherwise one ALCHEMY_API_KEY covers every chain.
+    rpcUrls: Object.fromEntries(
+      CHAINS.flatMap((c) => {
+        const url = env[`RPC_URL_${c.toUpperCase()}`] || (env.ALCHEMY_API_KEY ? alchemyRpcUrl(network, c, env.ALCHEMY_API_KEY) : undefined);
+        return url ? [[c, url]] : [];
+      }),
+    ),
     rateLimit: { enabled: env.RATE_LIMIT_DISABLED !== "1", readsPerMinute: 1000, writesPerMinute: 100 },
     indexers: {
       alchemySigningKeys: list(env.ALCHEMY_SIGNING_KEYS),
@@ -66,6 +80,11 @@ export function loadConfig(env = process.env): Config {
           sandbox: network !== "mainnet",
         }
       : null,
+    email: {
+      resendApiKey: env.RESEND_API_KEY || null,
+      from: env.EMAIL_FROM ?? "coin.new <billing@coin.new>",
+      dashboardUrl: (env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/$/, ""),
+    },
     intentTtlMinutes: 30,
   };
 }

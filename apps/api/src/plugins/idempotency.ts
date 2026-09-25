@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { idempotencyKeys, type Db } from "@coinnew/db";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { HttpError } from "../lib/errors.js";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
+const STALE_IN_FLIGHT_MS = 60_000;
 const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
 declare module "fastify" {
@@ -63,6 +64,24 @@ export function registerIdempotency(app: FastifyInstance, db: Db) {
       throw new HttpError(422, "idempotency_key_reused", "Idempotency-Key was already used with a different request");
     }
     if (existing.responseStatus == null) {
+      // A crashed or killed request leaves an in-flight row behind. After a grace
+      // period, let a retry take it over instead of blocking the key for 24h.
+      const [taken] = await db
+        .update(idempotencyKeys)
+        .set({ createdAt: new Date() })
+        .where(
+          and(
+            eq(idempotencyKeys.scope, scope),
+            eq(idempotencyKeys.key, key),
+            isNull(idempotencyKeys.responseStatus),
+            lt(idempotencyKeys.createdAt, new Date(Date.now() - STALE_IN_FLIGHT_MS)),
+          ),
+        )
+        .returning({ key: idempotencyKeys.key });
+      if (taken) {
+        req.idempotency = { scope, key };
+        return;
+      }
       throw new HttpError(409, "idempotency_in_progress", "A request with this Idempotency-Key is still being processed");
     }
     return reply
@@ -87,4 +106,9 @@ export function registerIdempotency(app: FastifyInstance, db: Db) {
     await db.update(idempotencyKeys).set({ responseStatus: reply.statusCode, responseBody: stored }).where(where);
     return payload;
   });
+}
+
+/** Deletes keys past the replay window (worker job). */
+export async function purgeIdempotencyKeys(db: Db) {
+  await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(Date.now() - WINDOW_MS)));
 }
