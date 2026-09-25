@@ -27,6 +27,7 @@ export interface Config {
   /** Licensed partner rails; null when not configured. */
   bridge: { apiKey: string; baseUrl: string; webhookPublicKey: string } | null;
   moonpay: { publishableKey: string; urlSigningSecret: string; webhookKey: string; sandbox: boolean } | null;
+  email: { resendApiKey: string | null; from: string; dashboardUrl: string };
   /** How long the checkout shows a payment intent as valid. */
   intentTtlMinutes: number;
 }
@@ -66,6 +67,11 @@ export function loadConfig(env = process.env): Config {
           sandbox: network !== "mainnet",
         }
       : null,
+    email: {
+      resendApiKey: env.RESEND_API_KEY || null,
+      from: env.EMAIL_FROM ?? "coin.new <billing@coin.new>",
+      dashboardUrl: (env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/$/, ""),
+    },
     intentTtlMinutes: 30,
   };
 }

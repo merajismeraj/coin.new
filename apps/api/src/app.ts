@@ -13,6 +13,7 @@ import type { WalletScreener } from "./services/screening.js";
 import type { PartnerDeps } from "./services/partners.js";
 import { BridgeClient, type BridgeApi } from "./rails/bridge.js";
 import { partnerWebhookRoutes } from "./routes/partner-webhooks.js";
+import { reconciliationRoutes } from "./routes/reconciliation.js";
 import { invoiceRoutes } from "./routes/invoices.js";
 import { merchantRoutes } from "./routes/merchants.js";
 
@@ -85,9 +86,10 @@ export async function buildApp({ db, config, verifier, screener, bridge = bridge
   const partners: PartnerDeps = { db, config, bridge, verifier, screener, log: app.log };
   await app.register(merchantRoutes, { db, partners });
   await app.register(invoiceRoutes, { db, config });
-  const payments: PaymentDeps = { db, verifier, screener, network: config.network, log: app.log };
+  const payments: PaymentDeps = { db, verifier, screener, network: config.network, dashboardUrl: config.email.dashboardUrl, log: app.log };
   await app.register(checkoutRoutes, { db, config, payments, partners });
   await app.register(partnerWebhookRoutes, { db, config });
+  await app.register(reconciliationRoutes, { db, payments });
   await app.register(indexerWebhookRoutes, { db, config });
   return app;
 }

@@ -135,6 +135,8 @@ export const CreateInvoiceBody = z.object({
   buyer_email: z.string().trim().toLowerCase().email().optional(),
   expires_in_hours: z.number().int().min(1).max(24 * 90).optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
+  /** Email the checkout link to buyer_email. */
+  notify_buyer: z.boolean().default(true),
 });
 export type CreateInvoiceBody = z.input<typeof CreateInvoiceBody>;
 
@@ -318,6 +320,51 @@ export interface PartnerStatus {
   payout_ready: boolean;
   liquidation_addresses: { chain: Chain; token: Token; address: string }[];
 }
+
+// ---- Reconciliation & reporting (Phase 4) -----------------------------------
+
+/** Settlement flags that record how a payment was matched rather than a risk. */
+export const INFO_FLAGS = new Set(["manual_match"]);
+export const riskFlagsOf = (flags: string[]) => flags.filter((f) => !INFO_FLAGS.has(f));
+
+const DateTime = z.string().datetime({ offset: true });
+
+export const ListSettlementsQuery = z.object({
+  invoice_id: z.string().uuid().optional(),
+  rail: z.enum(["onchain", "bridge", "moonpay"]).optional(),
+  from: DateTime.optional(),
+  to: DateTime.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.string().optional(),
+});
+
+export interface SettlementListItem extends Settlement {
+  invoice_id: string;
+  invoice_number: string;
+  invoice_amount_usd: string;
+  created_at: string;
+}
+
+export const ExportQuery = z.object({
+  format: z.literal("csv").default("csv"),
+  from: DateTime,
+  to: DateTime,
+});
+
+export interface UnmatchedTransfer {
+  id: string;
+  chain: Chain;
+  tx_hash: string;
+  token: Token;
+  amount: string;
+  from_address: string | null;
+  to_address: string;
+  status: "open" | "assigned" | "dismissed";
+  observed_at: string;
+  explorer_url: string;
+}
+
+export const AssignTransferBody = z.object({ invoice_id: z.string().uuid() });
 
 // ---- Outbound webhooks -----------------------------------------------------
 

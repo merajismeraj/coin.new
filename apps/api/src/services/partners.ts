@@ -12,12 +12,13 @@ import {
   type PartnerStatus,
   type Token,
 } from "@coinnew/shared-types";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Config } from "../config.js";
 import { HttpError } from "../lib/errors.js";
 import { BRIDGE_CRYPTO_RAILS, BridgeError, type BridgeApi, type ExternalAccountInput, type Transfer } from "../rails/bridge.js";
 import { MOONPAY_CURRENCY, signedWidgetUrl, type MoonPayTransaction } from "../rails/moonpay.js";
 import { onConfirmed } from "./payments.js";
+import { claimDue } from "../lib/claim.js";
 import type { WalletScreener } from "./screening.js";
 
 export interface PartnerDeps {
@@ -336,7 +337,7 @@ async function settlePartner(
     .onConflictDoNothing()
     .returning();
   await d.db.update(partnerSessions).set({ status: "completed", updatedAt: new Date() }).where(eq(partnerSessions.id, s.id));
-  if (row) await onConfirmed(d.db, row);
+  if (row) await onConfirmed(d.db, row, { network: d.config.network, dashboardUrl: d.config.email.dashboardUrl });
 }
 
 const markProcessing = async (d: PartnerDeps, s: typeof partnerSessions.$inferSelect) => {
@@ -428,7 +429,7 @@ async function handleBridgeKyc(d: PartnerDeps, obj: { id?: string; customer_id?:
 }
 
 export async function processPartnerEvents(d: PartnerDeps, limit = 50): Promise<number> {
-  const rows = await d.db.select().from(partnerEvents).where(isNull(partnerEvents.processedAt)).orderBy(asc(partnerEvents.receivedAt)).limit(limit);
+  const rows = await claimDue(d.db, partnerEvents, limit);
   for (const e of rows) {
     let error: string | null = null;
     try {
@@ -447,7 +448,7 @@ export async function processPartnerEvents(d: PartnerDeps, limit = 50): Promise<
     const attempts = e.attempts + 1;
     await d.db
       .update(partnerEvents)
-      .set({ attempts, lastError: error, processedAt: !error || attempts >= 60 ? new Date() : null })
+      .set({ attempts, lastError: error, processedAt: !error || attempts >= 60 ? new Date() : null, nextAttemptAt: new Date(Date.now() + Math.min(3_000 * 2 ** attempts, 10 * 60_000)) })
       .where(eq(partnerEvents.id, e.id));
   }
   return rows.length;

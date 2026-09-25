@@ -70,6 +70,7 @@ export async function createInvoice(_: FormState, form: FormData): Promise<FormS
         accepted_chains: form.getAll("accepted_chains"),
         expires_in_hours: hours ? Number(hours) : undefined,
         metadata: po ? { po_number: po } : {},
+        notify_buyer: form.get("notify_buyer") === "on",
       },
     });
   } catch (e) {
@@ -179,4 +180,33 @@ export async function setPayoutPreference(pref: "crypto" | "fiat_via_partner") {
   }
   revalidatePath("/settings");
   redirect("/settings");
+}
+
+// ---- Reconciliation (Phase 4) ------------------------------------------------
+
+export async function resendInvoice(id: string) {
+  try {
+    await authedApi(`/v1/invoices/${id}/resend`, { method: "POST" });
+  } catch (e) {
+    if (!(e instanceof ApiRequestError)) throw e;
+    redirect(`/invoices/${id}?notice=${encodeURIComponent(e.message)}`);
+  }
+  redirect(`/invoices/${id}?notice=${encodeURIComponent("Invoice sent to the buyer again.")}`);
+}
+
+export async function assignTransfer(id: string, form: FormData) {
+  const invoiceId = str(form, "invoice_id");
+  try {
+    await authedApi(`/v1/unmatched-transfers/${id}/assign`, { method: "POST", body: { invoice_id: invoiceId } });
+  } catch (e) {
+    if (!(e instanceof ApiRequestError)) throw e;
+    redirect(`/payments?error=${encodeURIComponent(e.message)}`);
+  }
+  revalidatePath("/payments");
+  redirect(`/invoices/${invoiceId}`);
+}
+
+export async function dismissTransfer(id: string) {
+  await authedApi(`/v1/unmatched-transfers/${id}/dismiss`, { method: "POST" });
+  revalidatePath("/payments");
 }

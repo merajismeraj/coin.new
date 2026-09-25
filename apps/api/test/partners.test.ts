@@ -219,6 +219,8 @@ describe("buyer pays by card (MoonPay)", () => {
     expect((await status(inv.id)).status).toBe("pending");
 
     ctx.chain.publish("base", tx, [{ logIndex: 0, tokenAddress: USDC, from: "0x00000000000000000000000000000000000000AA", to: EVM_WALLET, amountUnits: 99_000_000n }]);
+    // Retries back off; move the event's next attempt to now.
+    await ctx.db.update(partnerEvents).set({ nextAttemptAt: new Date() });
     await processPartnerEvents(ctx.partners);
     const got = await status(inv.id);
     expect(got.status).toBe("paid");

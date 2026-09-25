@@ -104,3 +104,9 @@ export function formatUnits(units: bigint, decimals: number): string {
  * (chain, token, receiving address), and at most $0.009999 over the invoice.
  */
 export const maxSuffix = (decimals: number) => 10n ** BigInt(decimals - 2) - 1n;
+
+/** Registry entry for a token contract / mint on a chain, if it is a supported stablecoin. */
+export function tokenByAddress(network: Network, chain: Chain, address: string): TokenInfo | undefined {
+  const family = CHAINS[network][chain].family;
+  return TOKENS[network].find((t) => t.chain === chain && sameAddress(family, t.address, address));
+}

@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { merchants, webhookDeliveries, type Db } from "@coinnew/db";
 import type { WebhookEvent, WebhookEventType } from "@coinnew/shared-types";
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lte } from "drizzle-orm";
 
 const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
@@ -71,13 +71,26 @@ export interface DeliveryOptions {
 export async function deliverDueWebhooks(db: Db, opts: DeliveryOptions): Promise<number> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now?.() ?? new Date();
-  const due = await db
-    .select({ d: webhookDeliveries, url: merchants.webhookUrl, secret: merchants.webhookSigningSecret })
-    .from(webhookDeliveries)
-    .innerJoin(merchants, eq(merchants.id, webhookDeliveries.merchantId))
-    .where(and(eq(webhookDeliveries.status, "pending"), lte(webhookDeliveries.nextAttemptAt, now)))
-    .orderBy(asc(webhookDeliveries.nextAttemptAt))
-    .limit(opts.batchSize ?? 50);
+  // Claim with SKIP LOCKED + a lease so several workers never double-deliver.
+  const claimed = await db.transaction(async (tx) => {
+    const ids = await tx
+      .select({ id: webhookDeliveries.id })
+      .from(webhookDeliveries)
+      .where(and(eq(webhookDeliveries.status, "pending"), lte(webhookDeliveries.nextAttemptAt, now)))
+      .orderBy(asc(webhookDeliveries.nextAttemptAt))
+      .limit(opts.batchSize ?? 50)
+      .for("update", { skipLocked: true });
+    if (!ids.length) return [];
+    return tx
+      .update(webhookDeliveries)
+      .set({ nextAttemptAt: new Date(now.getTime() + 2 * 60_000) })
+      .where(inArray(webhookDeliveries.id, ids.map((r) => r.id)))
+      .returning();
+  });
+  const secrets = claimed.length
+    ? await db.select({ id: merchants.id, url: merchants.webhookUrl, secret: merchants.webhookSigningSecret }).from(merchants).where(inArray(merchants.id, [...new Set(claimed.map((d) => d.merchantId))]))
+    : [];
+  const due = claimed.map((d) => ({ d, ...(secrets.find((m) => m.id === d.merchantId) ?? { url: null, secret: null }) }));
 
   for (const { d, url, secret } of due) {
     const attempts = d.attempts + 1;

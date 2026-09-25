@@ -15,7 +15,7 @@ Non-custodial stablecoin payment orchestration for cross-border B2B invoicing.
 | 1 | Merchant onboarding + API keys, invoice CRUD, dashboard, read-only checkout | ✅ |
 | 2 | Wallet connect, direct USDC/USDT transfer, Alchemy/Helius matching, merchant webhooks | ✅ |
 | 3 | Partner rail (Bridge/Circle) fiat on-ramp, MoonPay fallback, fiat payout | ✅ |
-| 4 | Settlements API, CSV export, expiry jobs, resend + email | — |
+| 4 | Settlements API, CSV export, expiry jobs, resend + email | ✅ |
 | 5 | Optional audited forwarder contract | — |
 
 ## Layout
@@ -83,6 +83,11 @@ stored). Limits: 100 writes/min and 1000 reads/min per key.
 | POST | `/v1/merchants/me/partner/bank-account` | Register payout bank account (US or IBAN) |
 | POST | `/v1/checkout/:invoice_id/fiat-session` | Public; bank transfer instructions or signed card widget URL |
 | POST | `/internal/webhooks/{bridge,moonpay}` | Partner notifications (signature-verified) |
+| POST | `/v1/invoices/:id/resend` | Re-email the checkout link (throttled) |
+| GET | `/v1/settlements` | Settlements; `invoice_id`, `rail`, `from`, `to`, `limit`, `cursor` |
+| GET | `/v1/reports/export?format=csv&from=&to=` | CSV of confirmed settlements |
+| GET | `/v1/unmatched-transfers` | Transfers awaiting manual reconciliation (`status=open|assigned|dismissed`) |
+| POST | `/v1/unmatched-transfers/:id/{assign,dismiss}` | Assign to an invoice (re-verified on-chain) or dismiss |
 
 ## How on-chain payments work (Phase 2)
 
@@ -141,6 +146,29 @@ reachable from the build environment):
   (merchant) wallet is allowed under your MoonPay agreement; standard on-ramp terms require the
   buyer to own the destination wallet. If not, use MoonPay's merchant/commerce product or drop card.
 
+## Reconciliation, reporting and notifications (Phase 4)
+
+- **Settlements API** (`GET /v1/settlements`, filter by invoice, rail and date, with cursor paging) and an
+  accountant-ready **CSV export** (`GET /v1/reports/export?format=csv&from=&to=`, at most 366 days).
+  Cells starting with `= + - @` are escaped: invoice numbers, buyer emails and metadata are user-controlled,
+  and spreadsheets would otherwise execute them as formulas.
+- **Unmatched transfers.** Stablecoin transfers that reach a merchant's receiving address (or Bridge
+  liquidation address) but match no intent are kept, not dropped. Typical causes: an exchange deducted
+  a withdrawal fee, or the buyer paid without using checkout. The merchant assigns each one to an invoice
+  or dismisses it. On assignment the transfer is re-verified on-chain and must be final; the settlement
+  carries a `manual_match` flag, and the dashboard shows any shortfall.
+- **Invoice expiry** is persisted by a job, which emits `invoice.expired` exactly once.
+- **Email via Resend**, through an outbox with retries. Buyers get the invoice (on create, or on
+  `POST /v1/invoices/:id/resend`, limited to once per 10 minutes and 5 times a day), a reminder 24h
+  before expiry, and a receipt. Merchants get a payment notification, marked "[Review]" only for real
+  risk flags. Merchant-controlled text is HTML-escaped. Without `RESEND_API_KEY`, emails are logged instead.
+- **Hardening:**
+  - Every worker job is safe to run as multiple processes (`FOR UPDATE SKIP LOCKED` plus leases, and
+    state transitions as conditional UPDATEs).
+  - Retries back off.
+  - Abandoned in-flight idempotency keys can be taken over after 60 seconds, and expired keys are purged.
+  - Finality checks always read the current chain head.
+
 ## Compliance posture
 
 coin.new is built to be jurisdiction-neutral: no market-specific logic in the codebase. The
@@ -153,10 +181,10 @@ but that's an architecture choice, not a legal guarantee. Get counsel sign-off p
 - **One receiving wallet per chain family** (`receiving_wallets: { evm, solana }`) replaces
   `default_receiving_wallet`. EVM addresses must carry a valid EIP-55 checksum if mixed-case:
   a checksum failure is almost always a typo in a payout address.
-- **Postgres-backed jobs instead of Redis/BullMQ** for now (inbound events, confirmations, fallback
-  scan, webhook delivery). Run a single worker process; move to BullMQ when volume needs it.
-- **Exact-amount matching only.** Underpayments, overpayments, or exchange withdrawals that deduct
-  fees don't match automatically; surfacing unmatched transfers for manual reconciliation is Phase 4.
+- **Postgres-backed jobs instead of Redis/BullMQ.** They're safe to run as several worker processes;
+  moving to a dedicated queue is only a throughput decision.
+- **Exact-amount matching**, plus manual reconciliation. Transfers that don't match exactly land in the
+  unmatched-transfers inbox for the merchant to assign.
 - **`merchants.api_key_hash` dropped.** Keys live only in `api_keys` (rotation/revocation).
   Keys are `cn_<key id>_<secret>` so auth is a single row lookup plus one argon2id verify.
 - **Invoice expiry is applied on read** (`pending` past `expires_at` reports `expired`) until the
@@ -165,4 +193,3 @@ but that's an architecture choice, not a legal guarantee. Get counsel sign-off p
   quoting is a follow-up; merchants can already receive EUR payouts to an IBAN.
 - **Dashboard auth is a stand-in:** the session is the API key in an httpOnly cookie. Replace with
   Clerk or Supabase Auth (spec §5.7) before GA.
-- **`/v1/invoices/:id/resend`** is deferred to Phase 4 alongside email delivery.

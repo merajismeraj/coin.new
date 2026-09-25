@@ -40,6 +40,10 @@ export function NewInvoiceForm({ idem, chains }: { idem: string; chains: Chain[]
         <Field label="Buyer email" hint="Optional" error={f.buyer_email}>
           <Input name="buyer_email" type="email" placeholder="ap@client.com" />
         </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="notify_buyer" defaultChecked className="accent-brand" />
+          Email the invoice to the buyer (with a reminder before it expires)
+        </label>
         <Field label="Accepted tokens" hint="Only official issuances are offered per chain (e.g. no USDT on Base)" error={f.accepted_tokens}>
           <Checkboxes name="accepted_tokens" options={TOKENS} />
         </Field>
