@@ -169,6 +169,22 @@ reachable from the build environment):
   - Abandoned in-flight idempotency keys can be taken over after 60 seconds, and expired keys are purged.
   - Finality checks always read the current chain head.
 
+## Indexer address registration (Alchemy Notify)
+
+With `ALCHEMY_AUTH_TOKEN` and `PUBLIC_API_URL` set, the worker keeps Alchemy watching the right
+addresses on its own. Every 30s it:
+
+- computes the desired set per EVM network: merchant wallets with that chain enabled, Bridge
+  liquidation addresses, and any address an open payment intent still points to, so a wallet change
+  can't orphan an in-flight payment;
+- creates, or adopts, one Address Activity webhook per network, storing each signing key for inbound
+  verification;
+- adds or removes the difference in batches.
+
+Every 6h it re-reads Alchemy's own list to heal drift. A Postgres advisory lock keeps it to one runner
+at a time, and a webhook deleted on Alchemy's side is recreated on the next run. Solana (Helius) is
+still registered by hand; the fallback scanner covers open intents either way.
+
 ## Compliance posture
 
 coin.new is built to be jurisdiction-neutral: no market-specific logic in the codebase. The

@@ -8,6 +8,8 @@ import { processPartnerEvents, type PartnerDeps } from "./services/partners.js";
 import { deliverEmails, LogSender, ResendSender } from "./services/email.js";
 import { expireInvoices, sendExpiryReminders } from "./services/jobs.js";
 import { purgeIdempotencyKeys } from "./plugins/idempotency.js";
+import { AlchemyNotifyClient } from "./indexers/alchemy-notify.js";
+import { syncAlchemyAddresses } from "./services/alchemy-sync.js";
 import { bridgeFromConfig } from "./app.js";
 
 // Background jobs, Postgres-backed (no Redis needed). Safe to run as several
@@ -46,6 +48,15 @@ every("partner-events", 3_000, () => processPartnerEvents(partners));
 every("expire-invoices", 60_000, () => expireInvoices(db));
 every("expiry-reminders", 10 * 60_000, () => sendExpiryReminders(db));
 every("email-delivery", 5_000, () => deliverEmails(db, emailSender, config.email.from));
+every("alchemy-address-sync", 30_000, () =>
+  syncAlchemyAddresses({
+    db,
+    network: config.network,
+    api: config.indexers.alchemyNotify ? new AlchemyNotifyClient(config.indexers.alchemyNotify.authToken) : null,
+    webhookUrl: config.indexers.alchemyNotify?.webhookUrl ?? null,
+    log,
+  }),
+);
 every("purge-idempotency-keys", 60 * 60_000, () => purgeIdempotencyKeys(db));
 every("webhook-delivery", 5_000, () => deliverDueWebhooks(db, { allowPrivateTargets: config.webhooks.allowPrivateTargets }));
 
