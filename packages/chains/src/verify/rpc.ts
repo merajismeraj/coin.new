@@ -14,6 +14,7 @@ export interface RpcConfig {
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxzAWVp7rnQnKgDDTxtcwNwgRr6rDTuH");
 const MAX_SCAN_BLOCKS = 5_000n;
+const MAX_TRANSFER_PAGES = 10;
 const ALCHEMY_HOST = /^https:\/\/[a-z0-9-]+\.g\.alchemy\.com\//;
 const NOT_FOUND: VerifiedTx = { found: false, final: false, blockTime: null, transfers: [] };
 
@@ -127,22 +128,35 @@ export class RpcChainVerifier implements ChainVerifier {
     return [...new Set(logs.map((l) => l.transactionHash).filter((h): h is `0x${string}` => !!h))];
   }
 
+  /**
+   * Newest first, following pageKey: a busy receiving address can get more than
+   * one page (100) of transfers between scans. Capped so one hot address can't
+   * stall the scan loop; the webhook path still covers it.
+   */
   private async alchemyTransfers(client: PublicClient, { tokenAddress, to, from }: { tokenAddress: string; to: string; from: bigint }): Promise<string[]> {
-    const res = (await client.request({
-      method: "alchemy_getAssetTransfers" as never,
-      params: [
-        {
-          fromBlock: `0x${from.toString(16)}`,
-          toBlock: "latest",
-          toAddress: to,
-          contractAddresses: [tokenAddress],
-          category: ["erc20"],
-          excludeZeroValue: true,
-          order: "desc",
-          maxCount: "0x64",
-        },
-      ] as never,
-    })) as { transfers: { hash: string }[] };
-    return [...new Set(res.transfers.map((t) => t.hash))];
+    const hashes = new Set<string>();
+    let pageKey: string | undefined;
+    for (let page = 0; page < MAX_TRANSFER_PAGES; page++) {
+      const res = (await client.request({
+        method: "alchemy_getAssetTransfers" as never,
+        params: [
+          {
+            fromBlock: `0x${from.toString(16)}`,
+            toBlock: "latest",
+            toAddress: to,
+            contractAddresses: [tokenAddress],
+            category: ["erc20"],
+            excludeZeroValue: true,
+            order: "desc",
+            maxCount: "0x64",
+            ...(pageKey && { pageKey }),
+          },
+        ] as never,
+      })) as { transfers: { hash: string }[]; pageKey?: string };
+      for (const t of res.transfers) hashes.add(t.hash);
+      if (!(pageKey = res.pageKey)) break;
+    }
+    return [...hashes];
   }
+
 }

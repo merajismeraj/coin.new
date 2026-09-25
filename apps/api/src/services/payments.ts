@@ -315,8 +315,12 @@ export async function scanOpenIntents(deps: PaymentDeps): Promise<number> {
       return [];
     });
     for (const h of hashes) {
+      // Skip what's already handled: settled, or already in the reconciliation inbox.
+      // A busy receiving address would otherwise be re-verified over RPC every pass.
       const [known] = await deps.db.select({ id: settlements.id }).from(settlements).where(and(eq(settlements.chain, g.chain), eq(settlements.txHash, h))).limit(1);
       if (known) continue;
+      const [inbox] = await deps.db.select({ id: unmatchedTransfers.id }).from(unmatchedTransfers).where(and(eq(unmatchedTransfers.chain, g.chain), eq(unmatchedTransfers.txHash, h))).limit(1);
+      if (inbox) continue;
       await processTransaction(deps, g.chain, h, { source: "fallback_scan" });
       processed++;
     }

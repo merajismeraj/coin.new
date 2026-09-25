@@ -34,6 +34,25 @@ describe("fallback scan", () => {
     expect(calls.some((c) => c.method === "eth_getLogs")).toBe(false);
   });
 
+  it("follows pageKey so a busy address can't push a payment off the first page", async () => {
+    const other = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
+    const calls = stubRpc((m, p) => {
+      if (m === "eth_blockNumber") return "0x100000";
+      const key = (p[0] as { pageKey?: string }).pageKey;
+      return key === "p2" ? { transfers: [{ hash: HASH }] } : { transfers: [{ hash: other(1) }, { hash: other(2) }], pageKey: "p2" };
+    });
+    const v = new RpcChainVerifier({ network: "mainnet", rpcUrls: { ethereum: "https://eth-mainnet.g.alchemy.com/v2/k" } });
+    expect(await v.scan("ethereum", { tokenAddress: TOKEN, to: TO, fromBlock: 0x10n })).toContain(HASH);
+    expect(calls.filter((c) => c.method === "alchemy_getAssetTransfers")).toHaveLength(2);
+  });
+
+  it("caps pagination at 10 pages", async () => {
+    const calls = stubRpc((m) => (m === "eth_blockNumber" ? "0x100000" : { transfers: [], pageKey: "more" }));
+    const v = new RpcChainVerifier({ network: "mainnet", rpcUrls: { ethereum: "https://eth-mainnet.g.alchemy.com/v2/k" } });
+    await v.scan("ethereum", { tokenAddress: TOKEN, to: TO, fromBlock: 0x10n });
+    expect(calls.filter((c) => c.method === "alchemy_getAssetTransfers")).toHaveLength(10);
+  });
+
   it("falls back to eth_getLogs when the transfers index is unavailable", async () => {
     const calls = stubRpc((m) =>
       m === "eth_blockNumber" ? "0x100000" : m === "eth_getLogs" ? [{ transactionHash: HASH, blockNumber: "0x1", logIndex: "0x0", address: TOKEN, data: pad("0x01"), topics: [toEventSelector("Transfer(address,address,uint256)"), pad(TO), pad(TO)] }] : new Error("method not supported"),
