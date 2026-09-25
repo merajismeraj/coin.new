@@ -271,8 +271,11 @@ export async function processInboundEvents(deps: PaymentDeps, limit = 50): Promi
 }
 
 /** Re-verifies unconfirmed settlements until final, or reverts them if the tx was reorged out. */
-export async function recheckUnconfirmed(deps: PaymentDeps): Promise<void> {
-  const rows = await deps.db.select().from(settlements).where(and(eq(settlements.rail, "onchain"), isNull(settlements.confirmedAt)));
+export async function recheckUnconfirmed(deps: PaymentDeps, only?: { invoiceId: string }): Promise<void> {
+  const rows = await deps.db
+    .select()
+    .from(settlements)
+    .where(and(eq(settlements.rail, "onchain"), isNull(settlements.confirmedAt), only ? eq(settlements.invoiceId, only.invoiceId) : undefined));
   for (const s of rows) {
     const chain = s.chain as Chain;
     const v = await deps.verifier.verify(chain, s.txHash!);

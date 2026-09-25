@@ -92,7 +92,7 @@ export async function buildApp({ db, config, verifier, screener, bridge = bridge
   await app.register(invoiceRoutes, { db, config });
   const payments: PaymentDeps = { db, verifier, screener, network: config.network, dashboardUrl: config.email.dashboardUrl, log: app.log };
   await app.register(checkoutRoutes, { db, config, payments, partners });
-  const inline = config.inlineWebhookProcessing;
+  const inline = config.inlineProcessing;
   await app.register(partnerWebhookRoutes, { db, config, processNow: inline ? () => processPartnerEvents(partners) : undefined });
   await app.register(reconciliationRoutes, { db, payments });
   await app.register(indexerWebhookRoutes, { db, config, processNow: inline ? () => processInboundEvents(payments) : undefined });

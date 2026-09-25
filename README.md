@@ -32,24 +32,30 @@ scripts/custody-guard.mjs  CI rule: no signers, key material, or custody-shaped 
 
 ## Deploying to Vercel
 
-Three Vercel projects from this repo, each with its own root directory:
+Three Vercel projects from this repo, each with its own root directory, and Supabase for Postgres
+and the job scheduler:
 
 | Project | Root directory | Notes |
 |---|---|---|
-| API | `apps/api` | Framework "Other", build command `pnpm vercel-build`. Emits a Build Output API artifact: one Node function for every route, plus a cron for the jobs. Runs migrations at build time. |
+| API | `apps/api` | Framework "Other", build command `pnpm vercel-build`. Emits a Build Output API artifact: one Node function for every route. Runs migrations at build time and, on production builds, schedules Supabase Cron. |
 | Dashboard | `apps/dashboard` | Next.js. `API_URL` = the API's URL. |
 | Checkout | `apps/checkout` | Next.js. `API_URL` = the API's URL; `NEXT_PUBLIC_NETWORK`. |
 
 Serverless has no always-on worker, so:
 
-- **Webhooks settle payments immediately** (`INLINE_WEBHOOK_PROCESSING=1`): an Alchemy/Helius/partner
+- **Supabase Cron runs the jobs.** Each production build of the API schedules (or updates) a
+  `pg_cron` job, `coinnew-tick`, that calls `GET /internal/cron/tick` every minute through `pg_net`
+  with `Authorization: Bearer $CRON_SECRET`. The secret lives in Supabase Vault, not in the job's
+  command. Each tick runs every job once: confirmation rechecks, the fallback scanner, merchant
+  webhooks, email, expiry. Override with `CRON_SCHEDULE` / `CRON_TICK_URL`. Previews never touch it.
+- **Webhooks settle payments immediately** (`INLINE_PROCESSING=1`): an Alchemy/Helius/partner
   webhook is stored, then processed in the same request. If that fails, the event stays queued.
-- **Vercel Cron runs every job once per tick** (`GET /internal/cron/tick`, `Authorization: Bearer
-  $CRON_SECRET`): confirmation rechecks, the fallback scanner, merchant webhooks, email, expiry.
-  Every minute needs a paid plan; on Hobby set `CRON_SCHEDULE` to a daily schedule and call the
-  tick from an external scheduler (any HTTP cron, with the bearer secret) for timely confirmations.
-- **Postgres:** Neon via the Vercel Marketplace. `DATABASE_URL` (pooled) at runtime,
-  `DATABASE_URL_UNPOOLED` for migrations. Pooled URLs disable prepared statements automatically.
+- **Checkout drives its own confirmation** (same flag): while an invoice is "processing", the buyer's
+  polling checkout page re-checks finality (at most every 10s per invoice), so payments reach "paid"
+  between ticks. Merchant webhooks and emails go out on the next tick.
+- **Postgres:** Supabase via the Vercel Marketplace, which sets `POSTGRES_URL` (pooled, port 6543:
+  prepared statements are disabled automatically) and `POSTGRES_URL_NON_POOLING` (used for
+  migrations and the cron setup). `DATABASE_URL` / `DATABASE_URL_UNPOOLED` override them.
 - `TRUSTED_PROXIES=*`: Vercel's edge sets the client IP, so rate limits apply per buyer.
 
 A server deployment keeps using `pnpm start` + `pnpm worker`; both run the same job list.

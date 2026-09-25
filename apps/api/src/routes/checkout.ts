@@ -18,12 +18,13 @@ import { z } from "zod";
 import type { Config } from "../config.js";
 import { HttpError, parse } from "../lib/errors.js";
 import { effectiveStatus, toCheckoutInvoice } from "../lib/serialize.js";
-import { createIntent, type PaymentDeps } from "../services/payments.js";
+import { createIntent, recheckUnconfirmed, type PaymentDeps } from "../services/payments.js";
 import { createBankTransferSession, createCardSession, fiatMethods, receivingAddresses, type PartnerDeps } from "../services/partners.js";
 import { FiatSessionBody } from "@coinnew/shared-types";
 import { MOONPAY_CURRENCY } from "../rails/moonpay.js";
 
 const MAX_OPEN_INTENTS_PER_INVOICE = 20;
+const RECHECK_THROTTLE_MS = 10_000;
 /** Reuse an existing intent only if the buyer still has this long to pay it. */
 const REUSE_MIN_REMAINING_MS = 5 * 60_000;
 
@@ -68,9 +69,26 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
     return { ...opt, amount: formatUnits(units, opt.decimals), amount_units: units.toString() };
   };
 
+  // Serverless: the buyer's open checkout page polls this, so it drives its own
+  // payment to "paid" instead of waiting for the next job run. Throttled per
+  // invoice so a public endpoint can't be used to amplify RPC calls.
+  const lastRecheck = new Map<string, number>();
+  const recheckIfDue = async (invoiceId: string) => {
+    const now = Date.now();
+    if (now - (lastRecheck.get(invoiceId) ?? 0) < RECHECK_THROTTLE_MS) return false;
+    lastRecheck.set(invoiceId, now);
+    if (lastRecheck.size > 10_000) lastRecheck.clear();
+    await recheckUnconfirmed(payments, { invoiceId }).catch((err: unknown) => app.log.warn({ invoiceId, err }, "on-demand recheck failed"));
+    return true;
+  };
+
   app.get("/v1/checkout/:invoice_id", async (req) => {
-    const { invoice, merchant } = await load(req.params);
-    const [s] = await db.select().from(settlements).where(eq(settlements.invoiceId, invoice.id)).orderBy(desc(settlements.createdAt)).limit(1);
+    let { invoice, merchant } = await load(req.params);
+    let [s] = await db.select().from(settlements).where(eq(settlements.invoiceId, invoice.id)).orderBy(desc(settlements.createdAt)).limit(1);
+    if (config.inlineProcessing && s?.rail === "onchain" && !s.confirmedAt && (await recheckIfDue(invoice.id))) {
+      ({ invoice, merchant } = await load(req.params));
+      [s] = await db.select().from(settlements).where(eq(settlements.invoiceId, invoice.id)).orderBy(desc(settlements.createdAt)).limit(1);
+    }
     const payment =
       s?.chain && s.txHash
         ? { chain: s.chain as Chain, tx_hash: s.txHash, explorer_url: chainInfo(config.network, s.chain as Chain).explorerTx(s.txHash), confirmed: !!s.confirmedAt }

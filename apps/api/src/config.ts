@@ -32,14 +32,15 @@ export interface Config {
   email: { resendApiKey: string | null; from: string; dashboardUrl: string };
   /** How long the checkout shows a payment intent as valid. */
   intentTtlMinutes: number;
-  /** Bearer secret for /internal/cron/tick (Vercel Cron sends it). The route is off when unset. */
+  /** Bearer secret for /internal/cron/tick (Supabase Cron sends it). The route is off when unset. */
   cronSecret: string | null;
   /**
-   * Process indexer and partner webhooks as soon as they're stored, not on the
-   * next worker pass. For serverless deployments, where the job runner may fire
-   * only every minute (or less often).
+   * For serverless deployments, where jobs run at most once a minute (Supabase
+   * Cron): process indexer and partner
+   * webhooks as soon as they're stored, and re-check a processing invoice's
+   * finality when its checkout page polls.
    */
-  inlineWebhookProcessing: boolean;
+  inlineProcessing: boolean;
 }
 
 // Alchemy's per-network hosts; one app key works on every network enabled for the app.
@@ -102,6 +103,6 @@ export function loadConfig(env = process.env): Config {
     },
     intentTtlMinutes: 30,
     cronSecret: env.CRON_SECRET || null,
-    inlineWebhookProcessing: env.INLINE_WEBHOOK_PROCESSING === "1",
+    inlineProcessing: env.INLINE_PROCESSING === "1",
   };
 }

@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p .",
-    "migrate": "tsx src/migrate-cli.ts"
+    "migrate": "tsx src/migrate-cli.ts",
+    "schedule-cron": "tsx src/supabase-cron-cli.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

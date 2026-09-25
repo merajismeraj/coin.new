@@ -8,9 +8,10 @@ import { HttpError } from "../lib/errors.js";
 const BUDGET_MS = 50_000;
 
 /**
- * Serverless job runner: Vercel Cron calls this (GET, `Authorization: Bearer
- * $CRON_SECRET`) and every worker job runs once. Registered only when
- * CRON_SECRET is set; an always-on deployment uses src/worker.ts instead.
+ * Serverless job runner: Supabase Cron calls this every minute (pg_net GET,
+ * `Authorization: Bearer $CRON_SECRET`) and every worker job runs once.
+ * Registered only when CRON_SECRET is set; an always-on deployment uses
+ * src/worker.ts instead.
  */
 export async function cronRoutes(app: FastifyInstance, { secret, jobs }: { secret: string; jobs: Job[] }) {
   const expected = Buffer.from(`Bearer ${secret}`);

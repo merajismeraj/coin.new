@@ -64,7 +64,7 @@ describe("inline webhook processing", () => {
   };
 
   it("settles a payment in the webhook request itself, with no job runner", async () => {
-    ctx = await setup({ inlineWebhookProcessing: true });
+    ctx = await setup({ inlineProcessing: true });
     const key = (await onboard(ctx!.app)).api_key.key;
     const inv = (await call(ctx!.app, "POST", "/v1/invoices", { key, body: { amount_usd: "50" } })).json();
     const i = (await call(ctx!.app, "POST", `/v1/checkout/${inv.id}/onchain-intent`, { idem: null, body: { chain: "base", token: "USDC", payer_address: PAYER_EVM } })).json();
@@ -75,8 +75,27 @@ describe("inline webhook processing", () => {
     expect((await call(ctx!.app, "GET", `/v1/invoices/${inv.id}`, { key })).json().status).toBe("paid");
   });
 
+  it("confirms a processing payment when the buyer's checkout page polls, throttled per invoice", async () => {
+    ctx = await setup({ inlineProcessing: true });
+    const key = (await onboard(ctx!.app)).api_key.key;
+    const inv = (await call(ctx!.app, "POST", "/v1/invoices", { key, body: { amount_usd: "75" } })).json();
+    const i = (await call(ctx!.app, "POST", `/v1/checkout/${inv.id}/onchain-intent`, { idem: null, body: { chain: "base", token: "USDC", payer_address: PAYER_EVM } })).json();
+    const tx = `0x${"aa".repeat(32)}`;
+    ctx!.chain.publish("base", tx, [{ logIndex: 0, tokenAddress: tokenInfo("mainnet", "base", "USDC")!.address, from: PAYER_EVM, to: i.to_address, amountUnits: BigInt(i.amount_units) }], false);
+    await webhook(tx);
+    expect((await call(ctx!.app, "GET", `/v1/invoices/${inv.id}`, { key })).json().status).toBe("processing");
+
+    ctx!.chain.finalize("base", tx);
+    const poll = async () => (await ctx!.app.inject({ method: "GET", url: `/v1/checkout/${inv.id}` })).json();
+    const first = await poll();
+    expect(first).toMatchObject({ status: "paid", payment: { tx_hash: tx, confirmed: true } });
+    const calls = ctx!.chain.calls;
+    await poll();
+    expect(ctx!.chain.calls).toBe(calls);
+  });
+
   it("still accepts and stores the event when processing fails, for the job runner to retry", async () => {
-    ctx = await setup({ inlineWebhookProcessing: true });
+    ctx = await setup({ inlineProcessing: true });
     ctx!.chain.verify = async () => {
       throw new Error("rpc down");
     };

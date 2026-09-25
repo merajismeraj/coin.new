@@ -1,6 +1,7 @@
-// Builds the API as a Vercel Build Output API artifact (.vercel/output):
-// one Node function serving every route, plus the cron that runs the jobs.
-// Runs database migrations first when a database is configured.
+// Builds the API as a Vercel Build Output API artifact (.vercel/output): one
+// Node function serving every route. Before that, when a database is set:
+// runs migrations, and on production builds schedules Supabase Cron (pg_cron +
+// pg_net) to call /internal/cron/tick, which runs the background jobs.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,11 +12,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, ".vercel/output");
 const fn = join(out, "functions/index.func");
 
-const migrateUrl = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
-if (migrateUrl) {
-  execFileSync("pnpm", ["--filter", "@coinnew/db", "migrate"], { stdio: "inherit", env: { ...process.env, DATABASE_URL: migrateUrl } });
+const env = process.env;
+// Direct (non-pooled) connection for DDL. Supabase's Vercel integration names it POSTGRES_URL_NON_POOLING.
+const directUrl = env.DATABASE_URL_UNPOOLED || env.POSTGRES_URL_NON_POOLING || env.DATABASE_URL || env.POSTGRES_URL;
+if (directUrl) {
+  execFileSync("pnpm", ["--filter", "@coinnew/db", "migrate"], { stdio: "inherit", env: { ...env, DATABASE_URL: directUrl } });
+  // Production only: previews must not repoint the job at themselves.
+  const tickUrl = env.CRON_TICK_URL || (env.VERCEL_PROJECT_PRODUCTION_URL && `https://${env.VERCEL_PROJECT_PRODUCTION_URL}/internal/cron/tick`);
+  if (env.VERCEL_ENV === "production" && env.CRON_SECRET && tickUrl) {
+    execFileSync("pnpm", ["--filter", "@coinnew/db", "schedule-cron"], { stdio: "inherit", env: { ...env, DATABASE_URL: directUrl, CRON_TICK_URL: tickUrl } });
+  }
 } else {
-  console.warn("vercel-build: no DATABASE_URL; skipping migrations");
+  console.warn("vercel-build: no DATABASE_URL; skipping migrations and cron");
 }
 
 rmSync(out, { recursive: true, force: true });
@@ -51,8 +59,6 @@ writeFileSync(
     {
       version: 3,
       routes: [{ src: "/(.*)", dest: "/index" }],
-      // Every minute needs a paid Vercel plan; Hobby allows once a day (set CRON_SCHEDULE).
-      crons: [{ path: "/internal/cron/tick", schedule: process.env.CRON_SCHEDULE || "* * * * *" }],
     },
     null,
     2,
