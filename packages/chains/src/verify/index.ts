@@ -31,6 +31,8 @@ export interface ChainVerifier {
   scan(chain: Chain, args: { tokenAddress: string; to: string; fromBlock: bigint | null }): Promise<string[]>;
   /** Current head block (EVM) / slot (Solana), used as an intent's scan start. */
   head(chain: Chain): Promise<bigint>;
+  /** Token balance of `owner` in base units (read-only; 0 when a Solana token account doesn't exist yet). */
+  balance(chain: Chain, args: { tokenAddress: string; owner: string }): Promise<bigint>;
 }
 
 export { RpcChainVerifier, type RpcConfig } from "./rpc.js";

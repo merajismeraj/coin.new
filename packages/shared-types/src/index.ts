@@ -366,6 +366,31 @@ export interface UnmatchedTransfer {
 
 export const AssignTransferBody = z.object({ invoice_id: z.string().uuid() });
 
+// ---- Wallet holdings --------------------------------------------------------
+
+/** A supported stablecoin held in one of the merchant's own receiving wallets. Read from chain; coin.new holds nothing. */
+export interface WalletHolding {
+  chain: Chain;
+  token: Token;
+  wallet: string;
+  token_address: string;
+  /** Decimal token amount (e.g. "37.192124"); null when the chain read failed. */
+  balance: string | null;
+  /** Whether checkout currently accepts payments on this chain. */
+  accepting: boolean;
+  error: string | null;
+}
+
+export interface WalletHoldings {
+  network: "mainnet" | "testnet";
+  as_of: string;
+  /** Sum of readable holdings, stablecoins at par, 2dp. */
+  total_usd: string;
+  /** False when any row failed, so total_usd understates the holding. */
+  complete: boolean;
+  data: WalletHolding[];
+}
+
 // ---- Outbound webhooks -----------------------------------------------------
 
 export const WEBHOOK_EVENTS = ["invoice.paid", "invoice.canceled", "invoice.expired", "settlement.confirmed"] as const;

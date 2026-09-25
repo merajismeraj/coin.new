@@ -21,7 +21,8 @@ import { toApiKey, toMerchant } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
 import { newSigningSecret } from "../services/webhooks.js";
 import { addBankAccount, enableFiatPayout, getPartnerStatus, startOnboarding, type PartnerDeps } from "../services/partners.js";
-import { BankAccountBody } from "@coinnew/shared-types";
+import { BankAccountBody, type WalletHoldings } from "@coinnew/shared-types";
+import { HoldingsService } from "../services/holdings.js";
 
 const REDACTED = "[redacted: shown once at creation]";
 
@@ -80,6 +81,8 @@ export async function merchantRoutes(app: FastifyInstance, { db, partners }: { d
     },
   );
 
+  const holdings = new HoldingsService(partners.verifier, partners.config.network);
+
   app.register(async (authed) => {
     authed.addHook("onRequest", requireMerchant(db));
 
@@ -126,6 +129,12 @@ export async function merchantRoutes(app: FastifyInstance, { db, partners }: { d
         .where(eq(merchants.id, req.merchantId!))
         .returning();
       return toMerchant(m!);
+    });
+
+    // Stablecoins sitting in the merchant's own receiving wallets, read from chain.
+    authed.get("/v1/merchants/me/holdings", async (req): Promise<WalletHoldings> => {
+      const m = await loadMe(req.merchantId!);
+      return holdings.get({ id: m.id, evmWallet: m.evmWallet, solanaWallet: m.solanaWallet, preferredChains: m.preferredChains as Chain[] });
     });
 
     // Secret used to sign outbound webhooks (X-coinnew-Signature). Readable by the merchant, like any webhook secret.

@@ -67,6 +67,7 @@ stored). Limits: 100 writes/min and 1000 reads/min per key.
 |---|---|---|
 | POST | `/v1/merchants` | Onboard; returns the first API key once |
 | GET / PATCH | `/v1/merchants/me` | Profile; wallet, chains, webhook URL |
+| GET | `/v1/merchants/me/holdings` | Stablecoins in the merchant's own receiving wallets, read from chain |
 | GET / POST | `/v1/merchants/me/api-keys` | List / issue |
 | DELETE | `/v1/merchants/me/api-keys/:id` | Revoke (the last active key can't be revoked) |
 | POST | `/v1/invoices` | Create |
@@ -184,6 +185,21 @@ addresses on its own. Every 30s it:
 Every 6h it re-reads Alchemy's own list to heal drift. A Postgres advisory lock keeps it to one runner
 at a time, and a webhook deleted on Alchemy's side is recreated on the next run. Solana (Helius) is
 still registered by hand; the fallback scanner covers open intents either way.
+
+## Wallet balance
+
+The Payments page shows the USDC/USDT sitting in the merchant's own receiving wallets
+(`GET /v1/merchants/me/holdings`). It is a read-only `balanceOf` / token-account read over the same RPC
+the verifier uses, so it works with any provider, not only Alchemy.
+
+- Only the registry's official contracts are queried. Wallets routinely receive spoofed "USDC" and
+  look-alike airdrops, and a token's symbol proves nothing.
+- Every chain the wallet can hold funds on is shown, including chains checkout no longer accepts, so
+  funds are never hidden.
+- A chain that can't be read is shown as such and the total is marked incomplete; one RPC outage never
+  fails the card, and a card failure never breaks the page.
+- The total is summed exactly and truncated to cents, never rounded up. Results are cached 30s per
+  merchant to protect RPC quota.
 
 ## Compliance posture
 

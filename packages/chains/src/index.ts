@@ -60,6 +60,9 @@ const TOKENS: Record<Network, TokenInfo[]> = {
   ],
 };
 
+/** Every supported stablecoin on a network, in display order. */
+export const TOKENS_BY_NETWORK: Readonly<Record<Network, readonly TokenInfo[]>> = TOKENS;
+
 export const chainInfo = (network: Network, chain: Chain): ChainInfo => CHAINS[network][chain];
 
 export const tokenInfo = (network: Network, chain: Chain, token: Token): TokenInfo | undefined =>

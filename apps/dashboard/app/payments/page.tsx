@@ -1,8 +1,9 @@
-import { riskFlagsOf, type Invoice, type Page, type SettlementListItem, type UnmatchedTransfer } from "@coinnew/shared-types";
+import { riskFlagsOf, type Invoice, type Page, type SettlementListItem, type UnmatchedTransfer, type WalletHoldings } from "@coinnew/shared-types";
 import Link from "next/link";
 import { authedApi } from "@/lib/api";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, ErrorBanner, Input, Select, date, usd } from "@/components/ui";
+import { WalletBalanceCard } from "@/components/wallet-holdings";
 import { assignTransfer, dismissTransfer } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -19,11 +20,13 @@ const via = (s: SettlementListItem) => (s.rail === "onchain" ? `${s.chain} trans
 export default async function PaymentsPage({ searchParams }: { searchParams: { rail?: string; cursor?: string; error?: string } }) {
   const rail = RAILS.find(([r]) => r && r === searchParams.rail)?.[0];
   const qs = new URLSearchParams({ limit: "50", ...(rail && { rail }), ...(searchParams.cursor && { cursor: searchParams.cursor }) });
-  const [page, unmatched, pending, expired] = await Promise.all([
+  const [page, unmatched, pending, expired, holdings] = await Promise.all([
     authedApi<Page<SettlementListItem>>(`/v1/settlements?${qs}`),
     authedApi<{ data: UnmatchedTransfer[] }>("/v1/unmatched-transfers"),
     authedApi<Page<Invoice>>("/v1/invoices?status=pending&limit=100"),
     authedApi<Page<Invoice>>("/v1/invoices?status=expired&limit=100"),
+    // A balance outage must never take down the payments page.
+    authedApi<WalletHoldings>("/v1/merchants/me/holdings").catch(() => null),
   ]);
   const assignable = [...pending.data, ...expired.data];
   const today = new Date().toISOString().slice(0, 10);
@@ -48,6 +51,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: { r
         </form>
       </div>
       <ErrorBanner message={searchParams.error} />
+      <WalletBalanceCard holdings={holdings} />
 
       {unmatched.data.length > 0 && (
         <Card title={`Needs reconciliation (${unmatched.data.length})`}>

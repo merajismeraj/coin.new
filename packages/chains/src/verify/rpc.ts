@@ -46,6 +46,22 @@ export class RpcChainVerifier implements ChainVerifier {
     return this.evmClient(chain).getBlockNumber();
   }
 
+  async balance(chain: Chain, { tokenAddress, owner }: { tokenAddress: string; owner: string }): Promise<bigint> {
+    if (chain === "solana") {
+      const conn = this.solana();
+      const ata = associatedTokenAddress(owner, tokenAddress);
+      // An absent account means the wallet has never held this token.
+      if (!(await conn.getAccountInfo(ata, "finalized"))) return 0n;
+      return BigInt((await conn.getTokenAccountBalance(ata, "finalized")).value.amount);
+    }
+    return this.evmClient(chain).readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [owner as `0x${string}`],
+    });
+  }
+
   async verify(chain: Chain, txHash: string): Promise<VerifiedTx> {
     return chain === "solana" ? this.verifySolana(txHash) : this.verifyEvm(chain, txHash);
   }

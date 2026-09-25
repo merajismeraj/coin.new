@@ -22,6 +22,8 @@ export const SANCTIONED_EVM = "0x000000000000000000000000000000000000dEaD";
 export class FakeChain implements ChainVerifier {
   txs = new Map<string, VerifiedTx>();
   heads: Partial<Record<Chain, bigint>> = {};
+  /** `${chain}:${token}:${owner}` → units; a thrown Error simulates an RPC failure. */
+  holdings = new Map<string, bigint | Error>();
   calls = 0;
 
   publish(chain: Chain, txHash: string, transfers: Omit<ObservedTransfer, "chain" | "txHash">[], final = true) {
@@ -41,6 +43,11 @@ export class FakeChain implements ChainVerifier {
     return [...this.txs.entries()]
       .filter(([k, v]) => k.startsWith(`${chain}:`) && v.transfers.some((t) => t.to.toLowerCase() === to.toLowerCase()))
       .map(([, v]) => v.transfers[0]!.txHash);
+  }
+  async balance(chain: Chain, { tokenAddress, owner }: { tokenAddress: string; owner: string }) {
+    const b = this.holdings.get(`${chain}:${tokenAddress.toLowerCase()}:${owner.toLowerCase()}`) ?? 0n;
+    if (b instanceof Error) throw b;
+    return b;
   }
   async head(chain: Chain) {
     return this.heads[chain] ?? 1000n;
