@@ -9,8 +9,10 @@ export interface Config {
   rpcUrls: Partial<Record<Chain, string>>;
   rateLimit: { enabled: boolean; readsPerMinute: number; writesPerMinute: number };
   indexers: {
-    /** One signing key per Alchemy webhook (they are per-network). */
+    /** One signing key per Alchemy webhook (they are per-network). Auto-managed webhooks add theirs from the DB. */
     alchemySigningKeys: string[];
+    /** Auto-registration of watched addresses (Alchemy Notify). Null when not configured. */
+    alchemyNotify: { authToken: string; webhookUrl: string } | null;
     /** Value Helius sends in the Authorization header. */
     heliusAuthHeader: string | null;
   };
@@ -57,6 +59,10 @@ export function loadConfig(env = process.env): Config {
     rateLimit: { enabled: env.RATE_LIMIT_DISABLED !== "1", readsPerMinute: 1000, writesPerMinute: 100 },
     indexers: {
       alchemySigningKeys: list(env.ALCHEMY_SIGNING_KEYS),
+      alchemyNotify:
+        env.ALCHEMY_AUTH_TOKEN && env.PUBLIC_API_URL
+          ? { authToken: env.ALCHEMY_AUTH_TOKEN, webhookUrl: `${env.PUBLIC_API_URL.replace(/\/$/, "")}/internal/webhooks/chain-indexer/alchemy` }
+          : null,
       heliusAuthHeader: env.HELIUS_AUTH_HEADER || null,
     },
     screening: {

@@ -215,3 +215,22 @@ export const emailOutbox = pgTable("email_outbox", {
   sentAt: timestamp("sent_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
+
+export const alchemyWebhooks = pgTable("alchemy_webhooks", {
+  alchemyNetwork: text("alchemy_network").primaryKey(),
+  webhookId: text("webhook_id").notNull(),
+  webhookUrl: text("webhook_url").notNull(),
+  signingKey: text("signing_key").notNull(),
+  lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+export const alchemyWatchedAddresses = pgTable(
+  "alchemy_watched_addresses",
+  {
+    alchemyNetwork: text("alchemy_network").notNull(),
+    address: text("address").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.alchemyNetwork, t.address] })],
+);

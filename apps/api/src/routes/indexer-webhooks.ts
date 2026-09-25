@@ -4,12 +4,9 @@ import type { Chain } from "@coinnew/shared-types";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Config } from "../config.js";
 import { HttpError } from "../lib/errors.js";
+import { chainForAlchemyNetwork } from "../indexers/alchemy-notify.js";
+import { alchemySigningKeyCache } from "../services/alchemy-sync.js";
 
-// Alchemy network ids → our chains. Only the configured network's ids are accepted.
-const ALCHEMY_NETWORKS: Record<Config["network"], Record<string, Chain>> = {
-  mainnet: { ETH_MAINNET: "ethereum", BASE_MAINNET: "base", MATIC_MAINNET: "polygon" },
-  testnet: { ETH_SEPOLIA: "ethereum", BASE_SEPOLIA: "base", MATIC_AMOY: "polygon" },
-};
 
 const safeEqual = (a: string, b: string) => {
   const x = Buffer.from(a);
@@ -26,6 +23,7 @@ const rawBody = (req: FastifyRequest) => (req as FastifyRequest & { rawBody?: st
  * as proof of payment.
  */
 export async function indexerWebhookRoutes(app: FastifyInstance, { db, config }: { db: Db; config: Config }) {
+  const managedKeys = alchemySigningKeyCache(db);
   const store = async (source: string, chain: Chain, hashes: string[], payload: unknown) => {
     const unique = [...new Set(hashes.filter((h) => typeof h === "string" && h.length > 0 && h.length < 128))];
     if (unique.length) {
@@ -42,15 +40,14 @@ export async function indexerWebhookRoutes(app: FastifyInstance, { db, config }:
   app.post("/internal/webhooks/chain-indexer/alchemy", opts, async (req, reply) => {
     const sig = req.headers["x-alchemy-signature"];
     const body = rawBody(req);
-    const valid =
-      typeof sig === "string" &&
-      config.indexers.alchemySigningKeys.some((k) => safeEqual(createHmac("sha256", k).update(body, "utf8").digest("hex"), sig));
+    const keys = [...config.indexers.alchemySigningKeys, ...(await managedKeys())];
+    const valid = typeof sig === "string" && keys.some((k) => safeEqual(createHmac("sha256", k).update(body, "utf8").digest("hex"), sig));
     if (!valid) {
       req.log.warn({ source: "alchemy" }, "rejected indexer webhook with invalid signature");
       throw new HttpError(401, "invalid_signature", "Invalid signature");
     }
     const payload = req.body as { event?: { network?: string; activity?: { hash?: string; category?: string }[] } };
-    const chain = ALCHEMY_NETWORKS[config.network][payload.event?.network ?? ""];
+    const chain = chainForAlchemyNetwork(config.network, payload.event?.network ?? "");
     if (!chain) return reply.code(202).send({ accepted: 0, ignored: "network" });
     const hashes = (payload.event?.activity ?? []).filter((a) => a.category === "token" || a.category === "erc20").map((a) => a.hash ?? "");
     return reply.code(202).send(await store("alchemy", chain, hashes, payload));
