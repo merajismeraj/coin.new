@@ -14,6 +14,7 @@ export interface RpcConfig {
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxzAWVp7rnQnKgDDTxtcwNwgRr6rDTuH");
 const MAX_SCAN_BLOCKS = 5_000n;
+const ALCHEMY_HOST = /^https:\/\/[a-z0-9-]+\.g\.alchemy\.com\//;
 const NOT_FOUND: VerifiedTx = { found: false, final: false, blockTime: null, transfers: [] };
 
 export const associatedTokenAddress = (owner: string, mint: string) =>
@@ -108,13 +109,40 @@ export class RpcChainVerifier implements ChainVerifier {
     const client = this.evmClient(chain);
     const head = await client.getBlockNumber();
     const floor = head > MAX_SCAN_BLOCKS ? head - MAX_SCAN_BLOCKS : 0n;
+    const from = fromBlock && fromBlock > floor ? fromBlock : floor;
+    // Alchemy's free tier caps eth_getLogs at a 10-block range, which would
+    // silently disable this fallback. Its transfers index has no range cap, so
+    // it also scans from the intent's own start block, however old.
+    if (ALCHEMY_HOST.test(this.url(chain))) {
+      const hashes = await this.alchemyTransfers(client, { tokenAddress, to, from: fromBlock ?? floor }).catch(() => null);
+      if (hashes) return hashes;
+    }
     const logs = await client.getLogs({
       address: tokenAddress as `0x${string}`,
       event: erc20Abi[2],
       args: { to: to as `0x${string}` },
-      fromBlock: fromBlock && fromBlock > floor ? fromBlock : floor,
+      fromBlock: from,
       toBlock: head,
     });
     return [...new Set(logs.map((l) => l.transactionHash).filter((h): h is `0x${string}` => !!h))];
+  }
+
+  private async alchemyTransfers(client: PublicClient, { tokenAddress, to, from }: { tokenAddress: string; to: string; from: bigint }): Promise<string[]> {
+    const res = (await client.request({
+      method: "alchemy_getAssetTransfers" as never,
+      params: [
+        {
+          fromBlock: `0x${from.toString(16)}`,
+          toBlock: "latest",
+          toAddress: to,
+          contractAddresses: [tokenAddress],
+          category: ["erc20"],
+          excludeZeroValue: true,
+          order: "desc",
+          maxCount: "0x64",
+        },
+      ] as never,
+    })) as { transfers: { hash: string }[] };
+    return [...new Set(res.transfers.map((t) => t.hash))];
   }
 }
