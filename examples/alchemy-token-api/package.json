@@ -1,0 +1,16 @@
+{
+  "name": "alchemy-token-api-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo of Alchemy's Token API on Ethereum Mainnet",
+  "scripts": {
+    "demo": "node demo-script.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.3"
+  }
+}
