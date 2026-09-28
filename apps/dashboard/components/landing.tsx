@@ -73,7 +73,7 @@ const STEPS = [
 ] as const;
 
 const COMPARISON = [
-  ["What it costs you", "Card fees, wire charges and FX spreads", "1% flat per paid invoice"],
+  ["What it costs you", "A percentage of every payment, plus wire charges", "$10 a month, whatever you collect"],
   ["When the money arrives", "1–5 business days", "Usually under a minute"],
   ["When you can get paid", "Bank hours", "24/7, weekends included"],
   ["Amount received", "Intermediary banks may deduct fees", "Exactly what you invoiced"],
@@ -84,7 +84,7 @@ const COMPARISON = [
 const FAQ = [
   [
     "What does coin.new cost?",
-    "1% of each paid invoice. One flat rate on every network and token, with no tiers. You pay nothing for invoices that aren’t paid. The sender covers the blockchain network fee.",
+    "Nothing until you get paid. Your $10 monthly plan starts with your first received payment. After that it’s a flat $10 a month: no percentage of your payments, no per-invoice fees and no tiers, whether you collect $1,000 or $1,000,000. The sender covers the blockchain network fee.",
   ],
   [
     "Do my clients need crypto to pay me?",
@@ -134,7 +134,7 @@ export function Landing() {
               See how it works ↓
             </a>
           </div>
-          <p className="mt-4 text-sm text-zinc-500">1% flat per paid invoice. Set up in about two minutes; all you need is a wallet address.</p>
+          <p className="mt-4 text-sm text-zinc-500">Free until your first payment, then $10 a month. Set up in about two minutes; all you need is a wallet address.</p>
         </div>
         <CheckoutPreview />
       </section>
@@ -229,13 +229,15 @@ export function Landing() {
         </div>
       </Section>
 
-      <Section id="pricing" eyebrow="Pricing" title="1% flat. You pay only when you get paid.">
+      <Section id="pricing" eyebrow="Pricing" title="Free until you get paid. Then $10 a month.">
         <div className="grid gap-6 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900 sm:p-8 md:grid-cols-[1fr_1.3fr] md:items-center">
           <div>
-            <p className="text-6xl font-semibold tracking-tight">1%</p>
-            <p className="mt-2 text-zinc-600 dark:text-zinc-400">per paid invoice</p>
+            <p className="text-6xl font-semibold tracking-tight">
+              $10<span className="text-2xl font-medium text-zinc-500"> / month</span>
+            </p>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">Flat. Starts with your first received payment. No percentage, no per-invoice fees.</p>
             <p className="mt-5 rounded-lg bg-zinc-50 px-4 py-3 text-sm dark:bg-zinc-800/60">
-              A <strong>$10,000</strong> invoice costs <strong>$100</strong>. An invoice that’s never paid costs nothing.
+              Collect <strong>$50,000</strong> this month and you pay <strong>$10</strong>. At a typical 3% card rate, the same volume would cost <strong>$1,500</strong>.
             </p>
             <div className="mt-6">
               <PrimaryCta>Get started</PrimaryCta>
