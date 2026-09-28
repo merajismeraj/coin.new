@@ -36,7 +36,7 @@ export interface PaymentDeps {
  */
 export async function createIntent(
   deps: PaymentDeps,
-  args: { invoiceId: string; amountUsd: string; chain: Chain; token: Token; toAddress: string; payerAddress: string; ttlMinutes: number },
+  args: { invoiceId: string; amountUsd: string; chain: Chain; token: Token; toAddress: string; payerAddress: string | null; ttlMinutes: number },
 ) {
   const t = tokenInfo(deps.network, args.chain, args.token)!;
   const base = usdToUnits(args.amountUsd, t.decimals);

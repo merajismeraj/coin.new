@@ -1,6 +1,6 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 
-// Checkout only serves /i/:id links.
+// Checkout serves /i/:id links; anything else goes to the storefront.
 export default function Home() {
-  notFound();
+  redirect(process.env.STOREFRONT_URL ?? "https://coin.new");
 }

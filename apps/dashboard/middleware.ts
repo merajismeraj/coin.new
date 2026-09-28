@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC = ["/login", "/onboarding"];
 
 export function middleware(req: NextRequest) {
-  const isPublic = PUBLIC.some((p) => req.nextUrl.pathname.startsWith(p));
+  const { pathname } = req.nextUrl;
+  // "/" is the storefront for visitors and the invoice list once signed in.
+  const isPublic = pathname === "/" || PUBLIC.some((p) => pathname.startsWith(p));
   if (!isPublic && !req.cookies.has("cn_session")) {
     return NextResponse.redirect(new URL("/login", req.url));
   }

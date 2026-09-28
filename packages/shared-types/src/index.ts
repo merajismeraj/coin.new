@@ -238,7 +238,8 @@ export interface CheckoutInvoice {
 export const PaymentSelection = z.object({ chain: Chain, token: Token });
 
 export const OnchainIntentBody = PaymentSelection.extend({
-  payer_address: WalletAddress,
+  /** The connected wallet. Omitted when the buyer sends manually (exchange, custodian, multisig); the sender is screened at settlement instead. */
+  payer_address: WalletAddress.optional(),
 });
 export type OnchainIntentBody = z.input<typeof OnchainIntentBody>;
 
@@ -255,7 +256,7 @@ export interface Quote extends PaymentOption {
  */
 export interface OnchainIntent extends Quote {
   id: string;
-  payer_address: string;
+  payer_address: string | null;
   expires_at: string;
 }
 

@@ -80,6 +80,22 @@ describe("payment intents", () => {
     expect((await intent(inv.id)).statusCode).toBe(409);
   });
 
+  it("issues an intent without a connected wallet for manual sends, and screens the sender at settlement", async () => {
+    const inv = await newInvoice();
+    const res = await intent(inv.id, { payer_address: undefined });
+    expect(res.statusCode).toBe(201);
+    const i = res.json() as OnchainIntent;
+    expect(i).toMatchObject({ to_address: EVM_WALLET, payer_address: null });
+    expect((await intent(inv.id, { payer_address: undefined })).json().id).toBe(i.id);
+    expect((await invoiceStatus(inv.id)).buyer_wallet).toBeNull();
+    expect((await intent(inv.id)).json().id).not.toBe(i.id);
+
+    await pay(i, TX(40), { from: SANCTIONED_EVM });
+    const got = await invoiceStatus(inv.id);
+    expect(got.status).toBe("paid");
+    expect(got.settlements[0].risk_flags.length).toBeGreaterThan(0);
+  });
+
   it("quotes at par without reserving", async () => {
     const inv = await newInvoice({ amount_usd: "19.99" });
     const q = (await call(ctx.app, "POST", `/v1/checkout/${inv.id}/quote`, { idem: null, body: { chain: "solana", token: "USDC" } })).json();

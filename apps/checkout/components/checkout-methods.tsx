@@ -7,7 +7,7 @@ import { PayPanel } from "./pay-panel";
 import { Providers } from "./providers";
 
 type Method = "wallet" | "bank_transfer" | "card";
-const LABEL: Record<Method, string> = { wallet: "Crypto wallet", bank_transfer: "Bank transfer", card: "Card" };
+const LABEL: Record<Method, string> = { wallet: "Stablecoin", bank_transfer: "Bank transfer", card: "Card" };
 
 export function CheckoutMethods({ invoice }: { invoice: CheckoutInvoice }) {
   const methods: Method[] = [...(invoice.payment_options.length ? ["wallet" as const] : []), ...invoice.fiat_methods];

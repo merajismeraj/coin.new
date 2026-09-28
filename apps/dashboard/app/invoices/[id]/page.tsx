@@ -1,8 +1,9 @@
-import { riskFlagsOf, TOKENS, type InvoiceWithSettlements } from "@coinnew/shared-types";
+import { CHAIN_LABELS, riskFlagsOf, TOKENS, type InvoiceWithSettlements } from "@coinnew/shared-types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ApiRequestError, authedApi } from "@/lib/api";
 import { CopyButton } from "@/components/copy-button";
+import { ShareLink } from "@/components/share-link";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, StatusBadge, date, usd } from "@/components/ui";
 import { cancelInvoice, resendInvoice } from "../../actions";
@@ -54,7 +55,7 @@ export default async function InvoicePage({ params, searchParams }: { params: { 
           <div className="flex gap-2">
             {inv.buyer_email && (
               <form action={resendInvoice.bind(null, inv.id)}>
-                <SubmitButton variant="secondary" pendingText="Sending…">Resend to buyer</SubmitButton>
+                <SubmitButton variant="secondary" pendingText="Sending…">Resend email</SubmitButton>
               </form>
             )}
             <form action={cancel}>
@@ -66,22 +67,38 @@ export default async function InvoicePage({ params, searchParams }: { params: { 
 
       {searchParams.notice && <p className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900">{searchParams.notice}</p>}
 
-      <Card title="Checkout link">
-        <div className="flex items-center gap-2">
-          <code className="flex-1 overflow-x-auto rounded-md bg-zinc-100 px-3 py-2 font-mono text-xs dark:bg-zinc-800">{inv.checkout_url}</code>
-          <CopyButton value={inv.checkout_url} />
-          <a href={inv.checkout_url} target="_blank" rel="noreferrer" className="rounded-md border border-zinc-300 px-3.5 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800">
-            Open
-          </a>
-        </div>
-      </Card>
+      {inv.status === "pending" ? (
+        <ShareLink url={inv.checkout_url} invoiceNumber={inv.invoice_number} amount={usd(inv.amount_usd)} buyerEmail={inv.buyer_email} />
+      ) : (
+        <>
+          {inv.status === "paid" && (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+              <strong>Paid.</strong> The funds are in your wallet. Details are under Settlements below.
+            </p>
+          )}
+          {inv.status === "processing" && (
+            <p className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+              <strong>Payment on its way.</strong> We’ve seen it and are waiting for final confirmation. This usually takes under a minute.
+            </p>
+          )}
+          <Card title="Payment link">
+            <div className="flex items-center gap-2">
+              <code className="flex-1 overflow-x-auto rounded-md bg-zinc-100 px-3 py-2 font-mono text-xs dark:bg-zinc-800">{inv.checkout_url}</code>
+              <CopyButton value={inv.checkout_url} />
+              <a href={inv.checkout_url} target="_blank" rel="noreferrer" className="rounded-md border border-zinc-300 px-3.5 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800">
+                Open
+              </a>
+            </div>
+          </Card>
+        </>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card title="Details">
           <dl className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            <Row label="Buyer">{inv.buyer_email ?? "—"}</Row>
+            <Row label="Client">{inv.buyer_email ?? "—"}</Row>
             <Row label="Tokens">{inv.accepted_tokens.join(", ")}</Row>
-            <Row label="Chains"><span className="capitalize">{inv.accepted_chains.join(", ")}</span></Row>
+            <Row label="Networks">{inv.accepted_chains.map((c) => CHAIN_LABELS[c]).join(", ")}</Row>
             <Row label="Created">{date(inv.created_at)}</Row>
             <Row label="Expires">{inv.expires_at ? date(inv.expires_at) : "Never"}</Row>
             {Object.entries(inv.metadata).map(([k, v]) => (
@@ -91,7 +108,7 @@ export default async function InvoicePage({ params, searchParams }: { params: { 
         </Card>
         <Card title="Settlements">
           {inv.settlements.length === 0 ? (
-            <p className="text-sm text-zinc-500">No payments observed yet. Settlements appear here as they’re confirmed on-chain or by the partner rail.</p>
+            <p className="text-sm text-zinc-500">No payment yet. It appears here the moment your client pays, and we’ll email you.</p>
           ) : (
             <ul className="space-y-3 text-sm">
               {inv.settlements.map((s) => (

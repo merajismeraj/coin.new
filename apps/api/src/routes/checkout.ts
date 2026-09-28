@@ -11,7 +11,7 @@ import {
   type Quote,
   type Token,
 } from "@coinnew/shared-types";
-import { and, count, desc, eq, gt } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { checksumEvm } from "../lib/address.js";
 import { z } from "zod";
@@ -114,15 +114,17 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
     const { invoice, merchant } = await load(req.params);
     const quote = await quoteFor(invoice, merchant, req.body);
     const body = parse(OnchainIntentBody, req.body);
-    if (walletFamily(body.payer_address) !== chainFamily(body.chain)) {
-      throw new HttpError(422, "payer_wallet_mismatch", `Connect a ${chainInfo(config.network, body.chain).name} wallet to pay on this chain`);
-    }
-    const payer = chainFamily(body.chain) === "evm" ? checksumEvm(body.payer_address, "payer_address") : body.payer_address;
-
-    const screening = await payments.screener.screen(body.chain, payer);
-    if (screening.blocked) {
-      req.log.warn({ invoice: invoice.id, chain: body.chain }, "checkout blocked by wallet screening");
-      throw new HttpError(403, "payer_not_permitted", "This wallet can't be used for this payment");
+    let payer: string | null = null;
+    if (body.payer_address) {
+      if (walletFamily(body.payer_address) !== chainFamily(body.chain)) {
+        throw new HttpError(422, "payer_wallet_mismatch", `Connect a ${chainInfo(config.network, body.chain).name} wallet to pay on this chain`);
+      }
+      payer = chainFamily(body.chain) === "evm" ? checksumEvm(body.payer_address, "payer_address") : body.payer_address;
+      const screening = await payments.screener.screen(body.chain, payer);
+      if (screening.blocked) {
+        req.log.warn({ invoice: invoice.id, chain: body.chain }, "checkout blocked by wallet screening");
+        throw new HttpError(403, "payer_not_permitted", "This wallet can't be used for this payment");
+      }
     }
 
     const toResponse = (i: typeof paymentIntents.$inferSelect): OnchainIntent => ({
@@ -131,7 +133,7 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
       to_address: i.toAddress,
       amount: formatUnits(BigInt(i.amountUnits), i.decimals),
       amount_units: i.amountUnits,
-      payer_address: i.payerAddress!,
+      payer_address: i.payerAddress,
       expires_at: i.expiresAt.toISOString(),
     });
 
@@ -144,7 +146,7 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
           open,
           eq(paymentIntents.chain, body.chain),
           eq(paymentIntents.token, body.token),
-          eq(paymentIntents.payerAddress, payer),
+          payer ? eq(paymentIntents.payerAddress, payer) : isNull(paymentIntents.payerAddress),
           eq(paymentIntents.toAddress, quote.to_address),
           gt(paymentIntents.expiresAt, new Date(Date.now() + REUSE_MIN_REMAINING_MS)),
         ),
@@ -164,7 +166,7 @@ export async function checkoutRoutes(app: FastifyInstance, { db, config, payment
       payerAddress: payer,
       ttlMinutes: config.intentTtlMinutes,
     });
-    await db.update(invoices).set({ buyerWallet: payer }).where(eq(invoices.id, invoice.id));
+    if (payer) await db.update(invoices).set({ buyerWallet: payer }).where(eq(invoices.id, invoice.id));
     return reply.code(201).send(toResponse(intent));
   });
 

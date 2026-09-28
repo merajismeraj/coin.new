@@ -63,7 +63,7 @@ export async function createInvoice(_: FormState, form: FormData): Promise<FormS
       method: "POST",
       idem: str(form, "idem"),
       body: {
-        amount_usd: str(form, "amount_usd"),
+        amount_usd: str(form, "amount_usd")?.replace(/,/g, ""),
         invoice_number: str(form, "invoice_number"),
         buyer_email: str(form, "buyer_email"),
         accepted_tokens: form.getAll("accepted_tokens"),

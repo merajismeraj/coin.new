@@ -9,13 +9,38 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWriteContract } from "wagmi";
 
-type Step = { kind: "choose" } | { kind: "review"; intent: OnchainIntent } | { kind: "sent"; intent: OnchainIntent; tx: string };
+type Step =
+  | { kind: "choose" }
+  | { kind: "review"; intent: OnchainIntent }
+  | { kind: "manual"; intent: OnchainIntent }
+  | { kind: "sent"; intent: OnchainIntent; tx: string | null };
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const errorText = (e: unknown) => {
   const m = (e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? "Something went wrong";
   return /reject|denied|cancel/i.test(m) ? "You cancelled the request in your wallet." : m;
 };
+
+function CopyValue({ value, label, className = "" }: { value: string; label: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className={`flex w-full items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 text-left hover:border-brand dark:border-zinc-700 ${className}`}
+    >
+      <span className="min-w-0">
+        <span className="block text-xs text-zinc-500">{label}</span>
+        <span className="block break-all font-mono text-sm">{value}</span>
+      </span>
+      <span className="shrink-0 text-xs font-medium text-brand">{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
+}
 
 function Btn(p: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "ghost" }) {
   const { tone = "primary", className = "", ...rest } = p;
@@ -71,16 +96,17 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
     }
   }
 
-  const getIntent = () =>
+  // Without a connected wallet the buyer sends manually (exchange, custodian, multisig).
+  const getIntent = (manual = false) =>
     run(async () => {
       const res = await fetch(`/api/checkout/${invoice.id}/intent`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chain: option.chain, token: option.token, payer_address: payer }),
+        body: JSON.stringify({ chain: option.chain, token: option.token, ...(!manual && { payer_address: payer }) }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error?.message ?? "Could not start payment");
-      setStep({ kind: "review", intent: body });
+      setStep({ kind: manual ? "manual" : "review", intent: body });
     });
 
   const pay = (intent: OnchainIntent) =>
@@ -115,9 +141,43 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
     return (
       <div className="space-y-3 text-center">
         <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-brand" aria-hidden />
-        <p className="font-semibold">Payment sent</p>
-        <p className="text-sm text-zinc-500">Waiting for the network to confirm. You can close this page; {invoice.merchant_name} will be notified.</p>
-        <p className="truncate font-mono text-xs text-zinc-400">{step.tx}</p>
+        <p className="font-semibold">{step.tx ? "Payment sent" : "Watching for your payment"}</p>
+        <p className="text-sm text-zinc-500">
+          {step.tx
+            ? `Waiting for the network to confirm. You can close this page; ${invoice.merchant_name} will be notified.`
+            : `This page updates as soon as ${step.intent.amount} ${step.intent.token} arrives on ${step.intent.chain_name}. Exchange withdrawals can take a few minutes. You can close this page; ${invoice.merchant_name} will be notified.`}
+        </p>
+        {step.tx && <p className="truncate font-mono text-xs text-zinc-400">{step.tx}</p>}
+        {!step.tx && (
+          <button className="text-xs text-zinc-500 hover:underline" onClick={() => setStep({ kind: "manual", intent: step.intent })}>
+            Show payment details again
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (step.kind === "manual") {
+    const i = step.intent;
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          Withdraw from your exchange or wallet using these details. Tap to copy.
+        </p>
+        <CopyValue label={`Amount (${i.token}), send exactly`} value={i.amount} />
+        <div className="rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-700">
+          <span className="block text-xs text-zinc-500">Network</span>
+          <span className="block text-sm font-semibold">{i.chain_name}</span>
+        </div>
+        <CopyValue label="Recipient address" value={i.to_address} />
+        {i.bridged && <CopyValue label={`${i.token} token contract (only this one counts)`} value={i.token_address} />}
+        <ul className="list-disc space-y-1 rounded-lg border border-amber-300 bg-amber-50 py-3 pl-7 pr-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <li>Select the <strong>{i.chain_name}</strong> network. A payment on any other network won’t be detected and may be hard to recover.</li>
+          <li>The amount must arrive exactly. If your exchange deducts its fee from the amount, add the fee on top.</li>
+          <li>The last digits identify your payment. Don’t round.</li>
+        </ul>
+        <Btn onClick={() => setStep({ kind: "sent", intent: i, tx: null })}>I’ve sent the payment</Btn>
+        <button className="w-full text-xs text-zinc-500 hover:underline" onClick={() => setStep({ kind: "choose" })}>Change network or token</button>
       </div>
     );
   }
@@ -201,7 +261,7 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
             <span>Connected: <span className="font-mono">{short(payer)}</span></span>
             <button className="hover:underline" onClick={() => (isSolana ? sol.disconnect() : disconnect())}>Disconnect</button>
           </div>
-          <Btn onClick={getIntent} disabled={busy}>{busy ? "Preparing…" : `Continue with ${option.token}`}</Btn>
+          <Btn onClick={() => getIntent()} disabled={busy}>{busy ? "Preparing…" : `Continue with ${option.token}`}</Btn>
         </div>
       ) : (
         <div className="space-y-2">
@@ -222,6 +282,14 @@ export function PayPanel({ invoice }: { invoice: CheckoutInvoice }) {
           )}
         </div>
       )}
+      <div className="flex items-center gap-3 text-xs text-zinc-400">
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        or
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+      </div>
+      <Btn tone="ghost" disabled={busy} onClick={() => getIntent(true)}>
+        Pay from an exchange or other wallet
+      </Btn>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     </div>
   );
