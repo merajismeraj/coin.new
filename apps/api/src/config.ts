@@ -41,6 +41,11 @@ export interface Config {
    * finality when its checkout page polls.
    */
   inlineProcessing: boolean;
+  /**
+   * Monthly subscription, billed as invoices from the platform's own merchant
+   * account (coin.new's receiving wallets). Null: billing off, nothing charged.
+   */
+  billing: { platformMerchantId: string; priceUsd: string; graceDays: number } | null;
 }
 
 // Alchemy's per-network hosts; one app key works on every network enabled for the app.
@@ -104,5 +109,8 @@ export function loadConfig(env = process.env): Config {
     intentTtlMinutes: 30,
     cronSecret: env.CRON_SECRET || null,
     inlineProcessing: env.INLINE_PROCESSING === "1",
+    billing: env.BILLING_MERCHANT_ID
+      ? { platformMerchantId: env.BILLING_MERCHANT_ID, priceUsd: Number(env.BILLING_PRICE_USD || "10").toFixed(2), graceDays: 14 }
+      : null,
   };
 }

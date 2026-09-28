@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 // Transactional email via an outbox: callers enqueue rows inside their own
 // flow; the worker delivers with retries. Sending never blocks a request.
 
-export type EmailTemplate = "invoice_issued" | "invoice_reminder" | "payment_receipt" | "payment_received_merchant";
+export type EmailTemplate = "invoice_issued" | "invoice_reminder" | "payment_receipt" | "payment_received_merchant" | "billing_invoice" | "billing_reminder";
 
 export interface EmailMessage {
   to: string;

@@ -22,7 +22,8 @@ import { toApiKey, toMerchant } from "../lib/serialize.js";
 import { requireMerchant } from "../plugins/auth.js";
 import { newSigningSecret } from "../services/webhooks.js";
 import { addBankAccount, enableFiatPayout, getPartnerStatus, startOnboarding, type PartnerDeps } from "../services/partners.js";
-import { BankAccountBody, type WalletHoldings } from "@coinnew/shared-types";
+import { BankAccountBody, type BillingSummary, type WalletHoldings } from "@coinnew/shared-types";
+import { billingSummary } from "../services/billing.js";
 import { HoldingsService } from "../services/holdings.js";
 
 const REDACTED = "[redacted: shown once at creation]";
@@ -136,6 +137,8 @@ export async function merchantRoutes(app: FastifyInstance, { db, partners }: { d
     });
 
     // Stablecoins sitting in the merchant's own receiving wallets, read from chain.
+    authed.get("/v1/merchants/me/billing", async (req): Promise<BillingSummary> => billingSummary(db, partners.config, req.merchantId!));
+
     authed.get("/v1/merchants/me/holdings", async (req): Promise<WalletHoldings> => {
       const m = await loadMe(req.merchantId!);
       return holdings.get({ id: m.id, evmWallet: m.evmWallet, solanaWallet: m.solanaWallet, preferredChains: m.preferredChains as Chain[] });

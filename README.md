@@ -255,6 +255,19 @@ the verifier uses, so it works with any provider, not only Alchemy.
 - The total is summed exactly and truncated to cents, never rounded up. Results are cached 30s per
   merchant to protect RPC quota.
 
+## Subscription billing
+
+coin.new charges a flat monthly plan (`BILLING_PRICE_USD`, default $10) that starts with a merchant's **first confirmed payment**; until then it's free.
+
+- **Billed with our own product.** coin.new has its own merchant account, holding coin.new's receiving wallets (`BILLING_MERCHANT_ID`). Each period's bill is an ordinary invoice from that account, addressed to the merchant's email and paid through the normal checkout. So the fee is collected without coin.new ever holding merchant funds.
+- **Periods** are whole calendar months from the start date (Jan 31 → Feb 28 → Mar 31), billed in advance. The `billing-issue` job issues the current period's bill. A unique `(merchant_id, period_start)` means concurrent runners bill once.
+- **Due** 14 days after issue, with a reminder 3 days before (`billing-reminders`). Bills never expire.
+- **Past due** pauses `POST /v1/invoices` (402 `billing_past_due`) until the bill is paid. Existing invoices keep collecting, so the merchant's clients are never affected.
+- **Waiving** a bill: cancel its invoice from the platform account.
+- `GET /v1/merchants/me/billing` returns the plan status and history. The dashboard shows it in Settings, plus a banner while a bill is open.
+
+To turn it on: create coin.new's merchant account through onboarding with coin.new's wallets, then set `BILLING_MERCHANT_ID` to its id on the API.
+
 ## Compliance posture
 
 coin.new is built to be jurisdiction-neutral: no market-specific logic in the codebase. The

@@ -94,3 +94,37 @@ export function paymentReceivedMerchant(c: PaidCtx & { dashboardUrl: string; ris
     text: `Invoice ${line(c.invoiceNumber)} paid: ${c.paidAmount} ${c.token} via ${c.via}. ${flagged}\n${c.dashboardUrl}`,
   };
 }
+
+// ---- coin.new subscription -------------------------------------------------------
+
+const day = (d: Date) => new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(d);
+
+export function billingInvoiceIssued(c: { amountUsd: string; periodStart: Date; periodEnd: Date; dueAt: Date; payUrl: string; dashboardUrl: string }): Omit<EmailMessage, "to"> {
+  const period = `${day(c.periodStart)} – ${day(c.periodEnd)}`;
+  return {
+    subject: line(`Your coin.new bill: ${usd(c.amountUsd)} due ${day(c.dueAt)}`),
+    html: layout(
+      "Your coin.new bill",
+      `<p style="font-size:32px;font-weight:700;margin:0">${usd(c.amountUsd)}</p>
+       <p style="color:#52525b;margin:4px 0 0">Plan for ${esc(period)} · Due ${esc(day(c.dueAt))}</p>
+       ${button(c.payUrl, "Pay your bill")}
+       <p style="font-size:13px;color:#52525b">Pay in USDC or USDT from any wallet or exchange, like your own clients do. Your plan covers unlimited invoices; there’s no percentage of your payments.</p>`,
+      `If a bill is still unpaid after its due date, creating new invoices is paused until it’s paid. Existing invoices keep working. Billing history: ${esc(c.dashboardUrl)}/settings`,
+    ),
+    text: `Your coin.new bill: ${usd(c.amountUsd)} for ${period}, due ${day(c.dueAt)}.\n\nPay: ${c.payUrl}\n\nIf it's unpaid after the due date, creating new invoices is paused until it's paid. Existing invoices keep working.`,
+  };
+}
+
+export function billingReminder(c: { amountUsd: string; dueAt: Date; payUrl: string; overdue: boolean }): Omit<EmailMessage, "to"> {
+  const when = c.overdue ? "is overdue" : `is due ${day(c.dueAt)}`;
+  return {
+    subject: line(`Reminder: your ${usd(c.amountUsd)} coin.new bill ${when}`),
+    html: layout(
+      `Your coin.new bill ${esc(when)}`,
+      `<p style="margin:0">Your ${usd(c.amountUsd)} bill ${esc(when)}. ${c.overdue ? "New invoices are paused until it’s paid." : "Pay it before then to keep creating new invoices."}</p>
+       ${button(c.payUrl, "Pay your bill")}`,
+      "Existing invoices keep working either way; your clients can always pay you.",
+    ),
+    text: `Your ${usd(c.amountUsd)} coin.new bill ${when}.\n\nPay: ${c.payUrl}`,
+  };
+}

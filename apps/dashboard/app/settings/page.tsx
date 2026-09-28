@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ApiKeySummary, Merchant, PartnerStatus } from "@coinnew/shared-types";
+import type { ApiKeySummary, BillingSummary, Merchant, PartnerStatus } from "@coinnew/shared-types";
+import { BillingCard } from "@/components/billing";
 import { authedApi, sessionKeyId } from "@/lib/api";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, ErrorBanner, date } from "@/components/ui";
@@ -10,11 +11,12 @@ import { BankAccountForm, IssueKeyForm, ProfileForm } from "./forms";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage({ searchParams }: { searchParams: { error?: string } }) {
-  const [me, partner, keys, webhook] = await Promise.all([
+  const [me, partner, keys, webhook, billing] = await Promise.all([
     authedApi<Merchant>("/v1/merchants/me"),
     authedApi<PartnerStatus>("/v1/merchants/me/partner"),
     authedApi<{ data: ApiKeySummary[] }>("/v1/merchants/me/api-keys"),
     authedApi<{ secret: string }>("/v1/merchants/me/webhook-secret"),
+    authedApi<BillingSummary>("/v1/merchants/me/billing"),
   ]);
   const active = keys.data.filter((k) => !k.revoked_at);
   const currentKeyId = sessionKeyId();
@@ -26,6 +28,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: { e
         <p className="mt-1 text-sm text-zinc-500">{me.business_name} · {me.email} · {me.country_code}</p>
       </div>
       <ErrorBanner message={searchParams.error} />
+
+      <BillingCard billing={billing} />
 
       <Card title="Payouts">
         <ProfileForm merchant={me} idem={randomUUID()} />

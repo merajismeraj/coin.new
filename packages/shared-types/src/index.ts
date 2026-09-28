@@ -425,3 +425,34 @@ export interface WebhookEvent<T = unknown> {
 export interface ApiError {
   error: { code: string; message: string; details?: unknown };
 }
+
+// ---- Subscription billing -----------------------------------------------------
+
+/**
+ * - free: no payment received yet, so the plan hasn't started
+ * - active: plan running, nothing overdue
+ * - past_due: a bill is past its due date; creating invoices is paused until it's paid
+ */
+export type BillingStatus = "free" | "active" | "past_due";
+
+export interface BillingPeriod {
+  id: string;
+  period_start: string;
+  period_end: string;
+  amount_usd: string;
+  /** due: unpaid, not yet late · past_due: unpaid after due_at · processing: payment seen, confirming · waived: canceled by coin.new */
+  status: "paid" | "processing" | "due" | "past_due" | "waived";
+  due_at: string;
+  invoice_number: string;
+  pay_url: string;
+}
+
+export interface BillingSummary {
+  /** False when the platform hasn't configured billing; nothing is charged. */
+  enabled: boolean;
+  price_usd: string;
+  status: BillingStatus;
+  started_at: string | null;
+  next_bill_at: string | null;
+  periods: BillingPeriod[];
+}

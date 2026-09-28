@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { AlchemyNotifyClient } from "./indexers/alchemy-notify.js";
 import { purgeIdempotencyKeys } from "./plugins/idempotency.js";
 import { syncAlchemyAddresses } from "./services/alchemy-sync.js";
+import { issueBills, sendBillingReminders } from "./services/billing.js";
 import { deliverEmails, LogSender, ResendSender } from "./services/email.js";
 import { expireInvoices, sendExpiryReminders } from "./services/jobs.js";
 import { processPartnerEvents, type PartnerDeps } from "./services/partners.js";
@@ -35,6 +36,8 @@ export function buildJobs(d: { db: Db; config: Config; payments: PaymentDeps; pa
     { name: "email-delivery", everyMs: 5_000, run: () => deliverEmails(db, emailSender, config.email.from) },
     { name: "expire-invoices", everyMs: 60_000, run: () => expireInvoices(db) },
     { name: "expiry-reminders", everyMs: 10 * 60_000, run: () => sendExpiryReminders(db) },
+    { name: "billing-issue", everyMs: 10 * 60_000, run: () => issueBills(db, config) },
+    { name: "billing-reminders", everyMs: 60 * 60_000, run: () => sendBillingReminders(db, config) },
     { name: "close-stale-intents", everyMs: 5 * 60_000, run: () => closeStaleIntents(db) },
     {
       name: "alchemy-address-sync",

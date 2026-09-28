@@ -10,6 +10,7 @@ import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { isUniqueViolation } from "../lib/errors.js";
 import { toInvoice, toSettlement } from "../lib/serialize.js";
 import type { WalletScreener } from "./screening.js";
+import { markBillingStarted } from "./billing.js";
 import { enqueueWebhook } from "./webhooks.js";
 
 /** Intents keep matching late payments for this long, then free their amount slot. */
@@ -180,6 +181,8 @@ export async function onConfirmed(db: Db, s: typeof settlements.$inferSelect, ct
       .set({ status: "assigned", settlementId: s.id, resolvedAt: new Date() })
       .where(and(eq(unmatchedTransfers.chain, s.chain), eq(unmatchedTransfers.txHash, s.txHash), eq(unmatchedTransfers.status, "open")));
   }
+  // The first confirmed payment a merchant receives starts their plan.
+  await markBillingStarted(db, inv!.merchantId);
   if (!paid) return;
   await enqueueWebhook(db, { merchantId: paid.merchantId, invoiceId: paid.id, type: "invoice.paid", data: { ...toInvoice(paid), settlements: [settlement] } });
 

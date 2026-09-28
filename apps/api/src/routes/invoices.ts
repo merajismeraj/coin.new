@@ -11,6 +11,7 @@ import { requireMerchant } from "../plugins/auth.js";
 import { enqueueWebhook } from "../services/webhooks.js";
 import { enqueueEmail, recentEmails } from "../services/email.js";
 import { invoiceIssued } from "../services/email-templates.js";
+import { isPastDue } from "../services/billing.js";
 import { supportedPairs } from "@coinnew/chains";
 
 const IdParams = z.object({ id: z.string().uuid() });
@@ -43,6 +44,9 @@ export async function invoiceRoutes(app: FastifyInstance, { db, config }: { db: 
   app.post("/v1/invoices", async (req, reply) => {
     const body = parse(CreateInvoiceBody, req.body);
     const merchantId = req.merchantId!;
+    if (config.billing && merchantId !== config.billing.platformMerchantId && (await isPastDue(db, merchantId))) {
+      throw new HttpError(402, "billing_past_due", "Your coin.new bill is past due. Pay it in Settings → Billing to create new invoices. Existing invoices keep working.");
+    }
     const [merchant] = await db.select({ preferredChains: merchants.preferredChains }).from(merchants).where(eq(merchants.id, merchantId));
     const allowed = merchant!.preferredChains as Chain[];
     const chains = body.accepted_chains ?? allowed;

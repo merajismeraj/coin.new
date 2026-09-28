@@ -18,6 +18,8 @@ export const merchants = pgTable("merchants", {
   partnerRailCustomerId: text("partner_rail_customer_id"),
   webhookUrl: text("webhook_url"),
   webhookSigningSecret: text("webhook_signing_secret"),
+  /** Set by the first confirmed payment the merchant receives; starts the monthly plan. */
+  billingStartedAt: timestamp("billing_started_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -234,3 +236,15 @@ export const alchemyWatchedAddresses = pgTable(
   },
   (t) => [primaryKey({ columns: [t.alchemyNetwork, t.address] })],
 );
+
+export const billingPeriods = pgTable("billing_periods", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  merchantId: uuid("merchant_id").notNull().references(() => merchants.id),
+  periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+  periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+  amountUsd: numeric("amount_usd", { precision: 18, scale: 2 }).notNull(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+  reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
+import type { BillingSummary } from "@coinnew/shared-types";
+import { BillingBanner } from "@/components/billing";
+import { api } from "@/lib/api";
 import { logout } from "./actions";
 import "./globals.css";
 
@@ -9,8 +12,10 @@ export const metadata: Metadata = {
   description: "Send a payment link and get paid in USDC or USDT straight to your own wallet, usually within a minute. Non-custodial invoicing for businesses.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const signedIn = cookies().has("cn_session");
+  // Never let a billing lookup break the page.
+  const billing = signedIn ? await api<BillingSummary>("/v1/merchants/me/billing").catch(() => null) : null;
   return (
     <html lang="en">
       <body className="font-sans">
@@ -42,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             )}
           </div>
         </header>
+        {billing && <BillingBanner billing={billing} />}
         <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
         {!signedIn && (
           <footer className="border-t border-zinc-200 dark:border-zinc-800">
