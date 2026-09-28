@@ -73,6 +73,7 @@ const STEPS = [
 ] as const;
 
 const COMPARISON = [
+  ["What it costs you", "Card fees, wire charges and FX spreads", "1% flat per paid invoice"],
   ["When the money arrives", "1–5 business days", "Usually under a minute"],
   ["When you can get paid", "Bank hours", "24/7, weekends included"],
   ["Amount received", "Intermediary banks may deduct fees", "Exactly what you invoiced"],
@@ -81,6 +82,10 @@ const COMPARISON = [
 ] as const;
 
 const FAQ = [
+  [
+    "What does coin.new cost?",
+    "1% of each paid invoice. One flat rate on every network and token, with no tiers. You pay nothing for invoices that aren’t paid. The sender covers the blockchain network fee.",
+  ],
   [
     "Do my clients need crypto to pay me?",
     "They need USDC or USDT in a wallet or an exchange account such as Coinbase or Kraken. They don’t need a coin.new account. Where our licensed partners operate, clients can also pay by bank transfer or card.",
@@ -129,7 +134,7 @@ export function Landing() {
               See how it works ↓
             </a>
           </div>
-          <p className="mt-4 text-sm text-zinc-500">Set up in about two minutes. All you need is a wallet address.</p>
+          <p className="mt-4 text-sm text-zinc-500">1% flat per paid invoice. Set up in about two minutes; all you need is a wallet address.</p>
         </div>
         <CheckoutPreview />
       </section>
@@ -221,6 +226,42 @@ export function Landing() {
           <Feature title="Non-custodial by design">Payments go from your client’s wallet straight to yours. We never hold funds and never ask for your keys. There’s nothing of yours for us to freeze.</Feature>
           <Feature title="Verified on the blockchain">An invoice is marked paid only after we read the payment from the chain itself, with the confirmations each network needs.</Feature>
           <Feature title="Screened and compliant">Paying wallets are screened against sanctions lists. Bank and card payments run through licensed partners.</Feature>
+        </div>
+      </Section>
+
+      <Section id="pricing" eyebrow="Pricing" title="1% flat. You pay only when you get paid.">
+        <div className="grid gap-6 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900 sm:p-8 md:grid-cols-[1fr_1.3fr] md:items-center">
+          <div>
+            <p className="text-6xl font-semibold tracking-tight">1%</p>
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">per paid invoice</p>
+            <p className="mt-5 rounded-lg bg-zinc-50 px-4 py-3 text-sm dark:bg-zinc-800/60">
+              A <strong>$10,000</strong> invoice costs <strong>$100</strong>. An invoice that’s never paid costs nothing.
+            </p>
+            <div className="mt-6">
+              <PrimaryCta>Get started</PrimaryCta>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Everything included</p>
+            <ul className="mt-3 grid gap-2 text-sm text-zinc-700 dark:text-zinc-300 sm:grid-cols-2">
+              {[
+                "Unlimited invoices and payment links",
+                "USDC and USDT on every supported network",
+                "Invoice, reminder and receipt emails",
+                "Automatic matching and reconciliation",
+                "CSV exports for your accountant",
+                "API and signed webhooks",
+              ].map((f) => (
+                <li key={f} className="flex gap-2">
+                  <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-5 text-xs leading-relaxed text-zinc-500">
+              Blockchain network fees are paid by the sender. Card payments and bank payouts run through licensed partners, whose own fees are shown before you or your client confirm.
+            </p>
+          </div>
         </div>
       </Section>
 
