@@ -5,6 +5,7 @@ import { authedApi, sessionKeyId } from "@/lib/api";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, ErrorBanner, date } from "@/components/ui";
 import { RevealSecret } from "@/components/secret";
+import { CopyButton } from "@/components/copy-button";
 import { revokeApiKey, rotateWebhookSecret, setPayoutPreference, startPartnerOnboarding } from "../actions";
 import { BankAccountForm, IssueKeyForm, ProfileForm } from "./forms";
 
@@ -26,6 +27,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: { e
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-zinc-500">{me.business_name} · {me.email} · {me.country_code}</p>
+        <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+          <span>Account ID</span>
+          <code className="rounded bg-zinc-100 px-2 py-1 font-mono dark:bg-zinc-800">{me.id}</code>
+          <CopyButton value={me.id} />
+        </div>
       </div>
       <ErrorBanner message={searchParams.error} />
 
